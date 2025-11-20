@@ -3,8 +3,8 @@ import cdsapi
 dataset = "derived-era5-single-levels-daily-statistics"
 
 # first_year = 1950
-first_year = 1992
-last_year = 2024
+first_year = 2023
+last_year = 2025
 for year in range(first_year, last_year + 1):
     print(f"working on year {year}")
     request = {
