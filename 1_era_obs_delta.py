@@ -1,4 +1,4 @@
-# analyzing the output of 0_era_medianshift.py
+# analyzing the output of 0_era_meanshift.py
 
 
 import numpy as np
@@ -14,6 +14,22 @@ import regionmask
 import holoviews as hv
 from holoviews import opts
 import cftime
+import bokeh
+import string
+from functools import partial
+
+
+# first figure had 6 panels
+# this figure has 9
+scale = 9 / 6
+title_size = 16 * scale
+label_size = 14 * scale
+tick_size = 10 * scale
+
+
+fwidth = 400
+fheight = 150
+
 
 xr.set_options(use_new_combine_kwarg_defaults=True)
 
@@ -52,6 +68,8 @@ else:
 reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors=11)[
     1:11
 ].cmap  # get rid of white
+
+
 rdbu_discrete = tastymap.cook_tmap("RdYlBu_r", num_colors=12).cmap
 
 ##########################################################
@@ -70,7 +88,8 @@ def get_delta_fig(
     new_years,
     clim_hwf=(0, 15),
     clim_hwd=(-6, 6),
-    clim_heatsum=(0, 50.5),
+    clim_heatsum=(0, 25),
+    clim_max=(-3, 3),
     cmap_hwf=reds_discrete,
     cmap_hwd=rdbu_discrete,
     cmap_heatsum=reds_discrete,
@@ -88,11 +107,11 @@ def get_delta_fig(
         cmap=cmap_hwf,
         clim=clim_hwf,
         # title=f"delta in heatwave frequency ({label_summer})\nmean({label_source} {new_years[0]}:{new_years[1]}) - mean(obs {ref_years[0]}:{ref_years[1]})",
-        title=f"Change in Heatwave Frequency",
+        title="Change in Frequency",
         clabel="days",
         xlabel="",
         ylabel="",
-    ).opts(fontscale=2.5, ylim=(-60, None))
+    ).opts(ylim=(-59, None))
 
     # delta in hwd
     hwd_delta = mean_diff_ds["t2m_x.t2m_x_threshold.HWD"]
@@ -102,11 +121,11 @@ def get_delta_fig(
         cmap=cmap_hwd,
         clim=clim_hwd,
         # title=f"delta in heatwave duration ({label_summer})\nmean({label_source} {new_years[0]}:{new_years[1]}) - mean(obs {ref_years[0]}:{ref_years[1]})",
-        title="Change in Heatwave Duration",
+        title="Change in Duration",
         clabel="days",
         xlabel="",
         ylabel="",
-    ).opts(fontscale=2.5, ylim=(-60, None))
+    ).opts(ylim=(-59, None))
 
     # # delta in avi
     # avi_delta = mean_diff_ds["t2m_x.t2m_x_threshold.AVI"]
@@ -130,10 +149,24 @@ def get_delta_fig(
         clim=clim_heatsum,
         # title=f"delta in cumulative heat ({label_summer})\nmean({label_source} {new_years[0]}:{new_years[1]}) - mean(obs {ref_years[0]}:{ref_years[1]})",
         title="Change in Cumulative Heat",
-        clabel="degC anomaly",
+        clabel="degC-days",
         xlabel="",
         ylabel="",
-    ).opts(fontscale=2.5, ylim=(-60, None))
+    ).opts(ylim=(-59, None))
+
+    # # delta in max seasonal temp
+    # max_delta = mean_diff_ds["t2m_x.t2m_x_threshold.MAX"]
+    # deltamap_max = max_delta.hvplot(
+    #     projection=ccrs.PlateCarree(),
+    #     coastline=True,
+    #     cmap=rdbu_discrete,
+    #     clim=clim_max,
+    #     # title=f"delta in seasonal max ({label_summer})\nmean({label_source} {new_years[0]}:{new_years[1]}) - mean(obs {ref_years[0]}:{ref_years[1]})",
+    #     title="Change in seasonal max",
+    #     clabel="degC anomaly",
+    #     xlabel="",
+    #     ylabel="",
+    # ).opts(fontscale=2.5, ylim=(-60, None))
 
     # combine
     fig_delta = (deltamap_hwf + deltamap_hwd + deltamap_heatsum).cols(1)
@@ -151,7 +184,37 @@ fig_delta_obs = get_delta_fig(
     label_summer=suffix,
     ref_years=ref_years,
     new_years=new_years,
+    # cmap_hwf=reds_discrete_odd,
 )
+# manually fix the tickers on hwf
+hwf_ticks = np.linspace(0, 15, 11)[::2]
+# manually fix the tickers on hwf
+fig_delta_obs[0].map(
+    lambda x: x.opts(
+        colorbar_opts={"ticker": bokeh.models.FixedTicker(ticks=hwf_ticks)}
+    ),
+    hv.Image,
+)
+
+# make sure order matches get_delta_fig!
+var_list = ["HWF", "HWD", "sumHeat"]  # , "MAX"]
+
+# add in some text
+fig_delta_obs = hv.Layout(
+    [
+        (
+            fig_delta_obs[i]
+            * hv.Text(
+                -180 + 220,
+                -60 + 10,
+                f"Global Mean={str(mean_diff_obs[f't2m_x.t2m_x_threshold.{var_list[i]}'].mean().values.round(2))}",
+                fontsize=label_size - 2,
+            )
+        ).opts(ylim=(-59, None))
+        for i in range(len(var_list))
+    ]
+)
+
 # hvplot.save(fig_delta_obs, f"fig_delta_obs_anom_{suffix}_ref{ref_years[0]}_{ref_years[1]}.html")
 
 
@@ -165,9 +228,20 @@ fig_delta_synth_init = get_delta_fig(
     label_summer=suffix,
     ref_years=ref_years,
     new_years=new_years,
+    # cmap_hwf=reds_discrete_odd,
+)
+# manually fix the tickers on hwf
+fig_delta_synth_init[0].map(
+    lambda x: x.opts(
+        colorbar_opts={
+            "ticker": bokeh.models.FixedTicker(ticks=hwf_ticks),
+        }
+    ),
+    hv.Image,
 )
 
-# also calculate the correlations for each, and add as labels
+
+### also calculate the correlations for each, and add as labels ---
 cor_obs_synth = xr.combine_by_coords(
     [
         xr.corr(
@@ -178,8 +252,6 @@ cor_obs_synth = xr.combine_by_coords(
     ]
 )
 
-# make sure order matches get_delta_fig!
-var_list = ["HWF", "HWD", "sumHeat"]
 
 fig_delta_synth = hv.Layout(
     [
@@ -188,10 +260,16 @@ fig_delta_synth = hv.Layout(
             * hv.Text(
                 -180 + 35,
                 -60 + 10,
-                f"r = {str(cor_obs_synth[f't2m_x.t2m_x_threshold.{var_list[i]}'].values.round(2))}",
-                fontsize=30,
+                f"r={str(cor_obs_synth[f't2m_x.t2m_x_threshold.{var_list[i]}'].values.round(2))}",
+                fontsize=label_size - 2,
             )
-        ).opts(fontscale=2.5, ylim=(-60, None))
+            * hv.Text(
+                -180 + 220,
+                -60 + 10,
+                f"Global Mean={str(mean_diff_synth[f't2m_x.t2m_x_threshold.{var_list[i]}'].mean().values.round(2))}",
+                fontsize=label_size - 2,
+            )
+        ).opts(ylim=(-59, None))
         for i in range(len(var_list))
     ]
 )
@@ -208,6 +286,7 @@ fig_obs_minus_synth_init = get_delta_fig(
     clim_hwf=(-10, 10),
     clim_hwd=(-3, 3),
     clim_heatsum=(-30, 30),
+    clim_max=(-2, 2),
     cmap_hwf=rdbu_discrete,
     cmap_hwd=rdbu_discrete,
     cmap_heatsum=rdbu_discrete,
@@ -221,12 +300,12 @@ fig_obs_minus_synth = hv.Layout(
         (
             fig_obs_minus_synth_init[i]
             * hv.Text(
-                -180 + 50,
+                -180 + 52,
                 -60 + 10,
-                f"MAE = {str(mean_abs_diff[f't2m_x.t2m_x_threshold.{var_list[i]}'].values.round(2))}",
-                fontsize=30,
+                f"MAE={str(mean_abs_diff[f't2m_x.t2m_x_threshold.{var_list[i]}'].values.round(2))}",
+                fontsize=label_size - 2,
             )
-        ).opts(fontscale=2.5, ylim=(-60, None))
+        ).opts(ylim=(-59, None), xlim=(-180, 180))
         for i in range(len(var_list))
     ]
 )
@@ -236,83 +315,79 @@ fig_obs_minus_synth = hv.Layout(
 fig_obs_minus_synth[0].opts(title=f"obs - synth ({suffix})")
 fig_obs_minus_synth[1].opts(title=f"obs - synth ({suffix})")
 fig_obs_minus_synth[2].opts(title=f"obs - synth ({suffix})")
-# fig_obs_minus_synth[3].opts(title=f"obs - synth ({suffix})", xlabel="a")
+# fig_obs_minus_synth[3].opts(title=f"obs - synth ({suffix})")
 
 
 # stitch all together into a single figure -------------------------
 fig1 = fig_delta_obs[0] + fig_delta_synth[0] + fig_obs_minus_synth[0]
-for i in [1, 2]:
+for i in np.arange(1, len(fig_delta_obs)).tolist():
     fig1 += fig_delta_obs[i] + fig_delta_synth[i] + fig_obs_minus_synth[i]
 
-fig1.cols(3).opts(shared_axes=False)
+
+# add subplot labels
+def subplot_label_hook(plot, element, sub_label=""):
+    """add subplot labels (a, b, c...)"""
+    # Access the underlying Bokeh figure
+    fig = plot.state
+
+    original_title = fig.title.text
+    fig.title.text = f"{sub_label} {original_title}"
+
+
+# iterate over the subplots and add the label to the title.
+updated_fig1list = []
+# weird ordering bc I want to go vertical instead of horizontal
+# letter ordering = string.ascii_lowercase[i]
+letter_ordering = ["a", "d", "g", "b", "e", "h", "c", "f", "i"]
+for i, subplot in enumerate(fig1):
+    new_label = f"({letter_ordering[i]})"  # this sets the format to (a), (b), ..
+    updated_subplot = subplot.opts(
+        hooks=[partial(subplot_label_hook, sub_label=new_label)]
+    )
+    updated_fig1list.append(updated_subplot)
+
+fig1_updated = hv.Layout(updated_fig1list)
+
+fig1_updated.cols(3).opts(shared_axes=False)
+
+####################
+# Final figure! ----
+####################
 
 # update of all maps here.
-fig1.map(lambda x: x.opts(xticks=0, yticks=0, xlabel=""), hv.Image).map(
-    lambda x: x.opts(xlabel=""), hv.Text
+fig1_updated.map(
+    lambda x: x.opts(
+        xticks=0,
+        yticks=0,
+        xlabel="",
+        xlim=(-180, 180),
+    ),
+    hv.Image,
+).map(lambda x: x.opts(xlabel=""), hv.Text)
+
+fig1_final = fig1_updated.map(
+    lambda x: x.options(
+        fontsize={
+            "title": title_size,
+            "labels": label_size,
+            "ticks": tick_size,
+            "legend": tick_size,
+        },
+        frame_width=fwidth,
+        frame_height=fheight,
+    ),
+    [hv.Image, hv.Text],
 )
 
-# hvplot.save(fig1, f'fig_medianshift_{suffix}_ref{ref_years[0]}_{ref_years[1]}.png')
-# hvplot.save(fig1, f'fig_medianshift_{suffix}_ref{ref_years[0]}_{ref_years[1]}.html')
 
-# size_opts = dict(frame_width=700, frame_height=400)
-# fig1.cols(3).opts(opts.Overlay(**size_opts))
+# hvplot.save(fig1_final, f"fig_meanshift_{suffix}_ref{ref_years[0]}_{ref_years[1]}.png")
 
 
-# #############################
-# # deep dives
-# #############################
+# fig1 = fig1.opts(
+#     # hv.opts.Image(width=700, height=295),
+#     # hv.opts.Text(text_font_size='30pt') # Scale up text annotations
+#     # hv.opts.Text(fontscale =3),
+# )
+# fig1.opts(hv.opts.Image(data_aspect = 1.2))
 
-# time_1985 = cftime.DatetimeNoLeap(
-#     1985, 1, 1, 0, 0, 0, 0, has_year_zero=True
-# )  # need this for the tick mark
-
-# # comparing the jja and doy versions, the following areas look different:
-# # (lon,lat) = (6, 30) # ~sudan
-# # (lon,lat) = (-50, -9) # ~ brazil
-
-
-# # sudan ----------------------
-# sudan_lon = 30
-# sudan_lat = 6
-
-
-# hw_sudan = hw_obs.sel(lon=sudan_lon, lat=sudan_lat, method="nearest")
-# vars_of_interest = ["HWF", "HWD", "sumHeat"]
-# hw_sudan_list = [
-#     (
-#         hw_sudan[f"t2m_x.t2m_x_threshold.{var}"].hvplot(
-#             title=f"{var}, sudan (lon, lat) = ({sudan_lon}, {sudan_lat}) ({suffix})"
-#         )
-#         * hv.VLine(time_1985)
-#     ).opts(opts.VLine(color="gray"))
-#     for var in vars_of_interest
-# ]
-# fig_hw_sudan = hv.Layout(hw_sudan_list).cols(1)
-
-# # brazil -----------------------------
-# brazil_lon = -50
-# brazil_lat = -9
-# hw_brazil = hw_obs.sel(lon=brazil_lon, lat=brazil_lat, method="nearest")
-# hw_brazil_list = [
-#     (
-#         hw_brazil[f"t2m_x.t2m_x_threshold.{var}"].hvplot(
-#             title=f"{var}, brazil (lon, lat) = ({brazil_lon}, {brazil_lat}) ({suffix})"
-#         )
-#         * hv.VLine(time_1985)
-#     ).opts(opts.VLine(color="gray"))
-#     for var in vars_of_interest
-# ]
-# fig_hw_brazil = hv.Layout(hw_brazil_list).cols(1)
-
-
-# fig_hw_casestudy = (
-#     fig_hw_brazil[0]
-#     + fig_hw_sudan[0]
-#     + fig_hw_brazil[1]
-#     + fig_hw_sudan[1]
-#     + fig_hw_brazil[2]
-#     + fig_hw_sudan[2]
-#     + fig_hw_brazil[3]
-#     + fig_hw_sudan[3]
-# ).cols(2)
-# # hvplot.save(fig_hw_casestudy, f"fig_hw_casestudy_{suffix}.html")
+# fig1.opts(width = 1000, height = 600, fontscale = 3)

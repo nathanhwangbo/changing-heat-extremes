@@ -7,24 +7,56 @@ import colorcet as cc
 import matplotlib as mpl
 import tastymap
 import regionmask
-import holoviews as hv
 import glob
 from xarray_einstats import stats  # wrapper around apply_ufunc for moments
 import pandas as pd
+import holoviews as hv
 import hvplot.pandas
 from holoviews import opts
 import statsmodels.api as sm
-
+import matplotlib.colors as mcolors
+import string
+from functools import partial
 
 xr.set_options(use_new_combine_kwarg_defaults=True)
+
+
+def subplot_label_hook(plot, element, sub_label=""):
+    """add subplot labels (a, b, c...)"""
+    # Access the underlying Bokeh figure
+    fig = plot.state
+
+    original_title = fig.title.text
+    fig.title.text = f"{sub_label} {original_title}"
+
+
+scale = 1  # in this case,
+title_size = 16 * scale
+label_size = 14 * scale
+tick_size = 10 * scale
+fwidth = 400
+fheight = 150
+
+# have 400 * 150 = 60000 to play with
+fwidth_qbins = 300
+fheight_qbins = 200
 
 # hvplot.extension("matplotlib")
 # hvplot.extension("bokeh")
 
 rdbu_discrete = tastymap.cook_tmap("RdYlBu_r", num_colors=12).cmap
+
+# rdbu_hex = [mcolors.rgb2hex(rdbu_discrete(i)) for i in range(rdbu_discrete.N)]
+# equivalent:
+# rdbu_discrete = tastymap.cook_tmap("RdYlBu_r", num_colors=12)
+# rdbu_hex = rdbu_discrete.to_model("hex")
+
 reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors=12)[
     1:11
 ].cmap  # get rid of white
+# equiv:
+# reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors = 12)
+# reds_discrete_no_white = tastymap.utils.subset_cmap(slice(1, 11)))
 blues_discrete = tastymap.cook_tmap("blues", num_colors=10).cmap
 
 
@@ -55,8 +87,8 @@ def add_landmask(ds):
 # Calculate mean differences (1986-2021) - (1950-1985) for heatwave metrics
 ##############################################################################
 
-ref_years = [1980, 1999]  # the time period the thresholds are calculated over
-new_years = [2006, 2025]  # the time period we're gonna compare to
+ref_years = [1960, 1990]  # the time period the thresholds are calculated over
+new_years = [1995, 2025]  # the time period we're gonna compare to
 
 use_calendar_summer = True  # if true, use JJA as summer. else use dayofyear mask
 if use_calendar_summer:
@@ -143,174 +175,11 @@ climatology_stats = xr.merge([clim_skew, clim_kurt, clim_var, clim_ar1])
 
 combined_ds = xr.merge([tmax_mean_diff, climatology_stats, hw_mean_diff], join="exact")
 
+combined_df = combined_ds.to_dataframe().dropna(how="all")
+
 # combined_ds.plot.scatter(
 #     x="t2m_x_mean_diff", y="t2m_x_skew", hue="t2m_x.t2m_x_threshold.HWF", s=10
 # )
-
-
-##########################################
-# the above has too many points
-# let's try hexbins
-#########################################
-
-combined_df = combined_ds.to_dataframe().dropna(how="all")
-
-
-def get_hexplots(y_name_var, y_name_label, x_name="t2m_x_mean_diff"):
-    # count (2d histogram)
-    fig_count = combined_df.hvplot.hexbin(
-        x=x_name,
-        y=y_name_var,
-        cmap=reds_discrete,
-        # clim=(0, 50), # for some reason clim inside doesn't work if we're doing count
-        title=f"gridcell count by climatological {y_name_label} and mean tmax shift\nThere are 14,728 land gridcells",
-        xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-        ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-        clabel="number of gridcells",
-        gridsize=10,
-        # min_count=10,
-    ).opts(clim=(0, 150))
-
-    # hwf
-    fig_hwf = combined_df.hvplot.hexbin(
-        x=x_name,
-        y=y_name_var,
-        C="t2m_x.t2m_x_threshold.HWF",
-        reduce_function=np.mean,
-        cmap=reds_discrete,
-        title=f"mean shift in heatwave frequency\nby climatological {y_name_label} and mean tmax shift",
-        xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-        ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-        clabel=f"heatwave frequency (days)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-        clim=(-4, 15),
-        width=600,
-        height=400,
-        gridsize=10,
-        # min_count=10,
-    )
-
-    # hwd
-    fig_hwd = combined_df.hvplot.hexbin(
-        x=x_name,
-        y=y_name_var,
-        C="t2m_x.t2m_x_threshold.HWD",
-        reduce_function=np.mean,
-        cmap=reds_discrete,
-        title=f"mean shift in heatwave duration\nby climatological {y_name_label} and mean tmax shift",
-        xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-        ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-        clabel=f"heatwave duration (days)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-        clim=(-2, 8),
-        width=600,
-        height=400,
-        gridsize=10,
-        # min_count=10,
-    )
-
-    # average intensity
-    fig_avi = combined_df.hvplot.hexbin(
-        x=x_name,
-        y=y_name_var,
-        C="t2m_x.t2m_x_threshold.AVI",
-        reduce_function=np.mean,
-        # data_aspect=1,
-        cmap=reds_discrete,
-        title=f"mean shift in heatwave average intensity\nby climatological {y_name_label} and mean tmax shift",
-        xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-        ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-        clabel=f"heatwave avg intensity (degC anom)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-        clim=(0, 0.75),
-        width=600,
-        height=400,
-        gridsize=10,
-        # min_count=10,
-    )
-
-    # cumulative intensity
-    fig_sumheat = combined_df.hvplot.hexbin(
-        x=x_name,
-        y=y_name_var,
-        C="t2m_x.t2m_x_threshold.sumHeat",
-        reduce_function=np.mean,
-        # data_aspect=1,
-        cmap=reds_discrete,
-        title=f"mean shift in heatwave cumulative intensity\nby climatological {y_name_label} and mean tmax shift",
-        xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-        ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-        clabel=f"heatwave cumulative intensity (degC anom)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-        clim=(-5, 40),
-        width=600,
-        height=400,
-        gridsize=10,
-        # min_count=10,
-    )
-
-    figlist = [
-        fig_count,
-        fig_hwf,
-        fig_hwd,
-        fig_avi,
-        fig_sumheat,
-    ]
-    return figlist
-
-
-### skewness ----------------------------------------
-
-
-combined_ds["t2m_x_skew"].hvplot(
-    projection=ccrs.PlateCarree(),
-    coastline=True,
-    cmap=rdbu_discrete,
-    # clim=(0, 30),
-    title=f"climatological skewness ({ref_years[0]}:{ref_years[1]})",
-    clabel="skewness",
-).opts(fontscale=1.5)  # .opts(width=600, height=400)#
-figlist_skewness = get_hexplots("t2m_x_skew", "skewness")
-fig_skewness_count = figlist_skewness[0].opts(width=600, height=400)
-fig_layout_skewness = hv.Layout(figlist_skewness[1:]).cols(2)
-fig_layout_skewness
-
-# size_opts = dict(width=700, height=400)
-# fig_layout_skewness.opts(opts.HexTiles(**size_opts))
-
-# hvplot.save(fig_layout_skewness, "fig_hex10_skew.html")
-
-
-### variance ----------------------------------------
-
-combined_ds["t2m_x_var"].hvplot(
-    projection=ccrs.PlateCarree(),
-    coastline=True,
-    cmap=reds_discrete,
-    # clim=(0, 30),
-    title=f"climatological variance ({ref_years[0]}:{ref_years[1]})",
-    clabel="variance (degC^2)",
-).opts(fontscale=1.5)
-
-figlist_var = get_hexplots("t2m_x_var", "variance")
-fig_var_count = figlist_var[0].opts(xlim=(-1, 3), width=600, height=400)
-
-fig_layout_var = hv.Layout(figlist_var[1:]).cols(2)
-fig_layout_var
-# hvplot.save(fig_layout_var, "fig_hex10_var.html")
-
-### ar1 ----------------------------------------
-combined_ds["t2m_x_ar1"].hvplot(
-    projection=ccrs.PlateCarree(),
-    coastline=True,
-    cmap=reds_discrete,
-    # clim=(0, 30),
-    title=f"climatological AR(1) ({ref_years[0]}:{ref_years[1]})",
-    clabel="AR(1)",
-).opts(fontscale=1.5)
-
-
-figlist_ar1 = get_hexplots("t2m_x_ar1", "AR(1)")
-fig_ar1_count = figlist_ar1[0].opts(width=600, height=400)
-
-fig_layout_ar1 = hv.Layout(figlist_ar1[1:]).cols(2)
-# hvplot.save(fig_layout_ar1, "fig_hex10_ar1.html")
 
 
 ##########################################
@@ -331,6 +200,15 @@ combined_df["ar1_qbins"] = pd.qcut(
     q=n_qbins,
     precision=1,
 )
+
+# fixing the first variance bin looking like this : (0.16999999999999998, 0.58]
+var_qbin_cats = combined_df["var_qbins"].cat.categories.to_list()
+new_first_interval_var = pd.Interval(
+    round(var_qbin_cats[0].left, 2), round(var_qbin_cats[0].right, 2), closed="right"
+)
+var_qbin_cats[0] = new_first_interval_var
+combined_df["var_qbins"] = combined_df["var_qbins"].cat.rename_categories(var_qbin_cats)
+
 
 # fixing the first bin looking like this : (0.16999999999999998, 0.58]
 ar1_qbin_cats = combined_df["ar1_qbins"].cat.categories.to_list()
@@ -377,8 +255,6 @@ def get_heatmap(
     df[y_name_var] = df[y_name_var].astype(str)
 
     # count (2d histogram)
-    # # plot count (i.e. 2d histogram)
-    # don't need this one here bc quantiles guarantee rough uniformity
     fig_count = (
         df.hvplot.heatmap(
             x=x_name,
@@ -408,13 +284,15 @@ def get_heatmap(
             C="t2m_x.t2m_x_threshold.HWF",
             reduce_function=np.mean,
             cmap=reds_discrete,
-            title=f"mean shift in heatwave frequency\nby climatological {y_name_label} and mean tmax shift",
-            xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-            ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-            clabel=f"heatwave frequency (days)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+            title="Change in HWF",
+            xlabel="Change in Daily Max Anomalies (C)",
+            ylabel=f"Climatological {y_name_label}",
+            clabel="Days",
+            # title=f"mean shift in heatwave frequency\nby climatological {y_name_label} and mean tmax shift",
+            # xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
+            # ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
+            # clabel=f"heatwave frequency (days)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
             clim=(1, 11),
-            width=600,
-            height=400,
             # min_count=10,
         )
         .redim.values(  # hack to order the bins
@@ -430,11 +308,13 @@ def get_heatmap(
             y=y_name_var,
             C="t2m_x.t2m_x_threshold.HWD",
             reduce_function=np.mean,
-            title=f"mean shift in heatwave duration\nby climatological {y_name_label} and mean tmax shift",
-            xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-            ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-            width=600,
-            height=400,
+            title="Change in HWD",
+            xlabel="Change in Daily Max Anomalies (C)",
+            ylabel=f"Climatological {y_name_label}",
+            clabel="Days",
+            # title=f"mean shift in heatwave duration\nby climatological {y_name_label} and mean tmax shift",
+            # xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
+            # ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
             # min_count=10,
         )
         .redim.values(  # hack to order the bins
@@ -444,35 +324,10 @@ def get_heatmap(
             cmap=reds_discrete,
             cticks=[0, 1, 2, 3, 4, 5],
             clim=(0, 5),
-            clabel=f"heatwave duration (days)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+            # clabel=f"heatwave duration (days)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
             xrotation=45,
         )
     )
-
-    # average intensity
-    fig_avi = (
-        df.hvplot.heatmap(
-            x=x_name,
-            y=y_name_var,
-            C="t2m_x.t2m_x_threshold.AVI",
-            reduce_function=np.mean,
-            # data_aspect=1,
-            cmap=reds_discrete,
-            title=f"mean shift in heatwave average intensity\nby climatological {y_name_label} and mean tmax shift",
-            xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-            ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-            clabel=f"heatwave avg intensity (degC anom)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-            clim=(0, 0.5),
-            width=600,
-            height=400,
-            # min_count=10,
-        )
-        .redim.values(  # hack to order the bins
-            **bin_ordering_dict
-        )
-        .opts(xrotation=45)
-    )
-
     # cumulative intensity
     fig_sumheat = (
         df.hvplot.heatmap(
@@ -482,13 +337,15 @@ def get_heatmap(
             reduce_function=np.mean,
             # data_aspect=1,
             cmap=reds_discrete,
-            title=f"mean shift in heatwave cumulative intensity\nby climatological {y_name_label} and mean tmax shift",
-            xlabel="tmax mean(1986:2021) - mean(1950:1985)\nanomalies wrt 1960-1985 (C)",
-            ylabel=f"sample {y_name_label} over 1960-1985",
-            clabel=f"heatwave cumulative intensity (degC anom)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+            title="Change in sumHeat",
+            xlabel="Change in Daily Max Anomalies (C)",
+            ylabel=f"Climatological {y_name_label}",
+            clabel="T Anomalies (C)",
+            # title=f"mean shift in heatwave cumulative intensity\nby climatological {y_name_label} and mean tmax shift",
+            # xlabel="tmax mean(1986:2021) - mean(1950:1985)\nanomalies wrt 1960-1985 (C)",
+            # ylabel=f"sample {y_name_label} over 1960-1985",
+            # clabel=f"heatwave cumulative intensity (degC anom)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
             clim=(1, 21),
-            width=600,
-            height=400,
             # min_count=10,
         )
         .redim.values(  # hack to order the bins
@@ -501,36 +358,17 @@ def get_heatmap(
         figlist = [
             fig_hwf,
             fig_hwd,
-            fig_avi,
             fig_sumheat,
+            fig_count,
         ]
     else:
         figlist = [
             fig_count,
             fig_hwf,
             fig_hwd,
-            fig_avi,
             fig_sumheat,
         ]
     return figlist
-
-
-### skewness ----------------------------------------
-
-# hvplot.extension('matplotlib')
-# hvplot.extension('bokeh')
-
-figlist_skewness_qbins = get_heatmap(
-    combined_df, y_name_var="skew_qbins", y_name_label="skewness", use_qbins=True
-)
-fig_layout_skewness_qbins = hv.Layout(figlist_skewness_qbins).cols(2)
-fig_layout_skewness_qbins
-
-
-# mpl_render = hv.renderer('matplotlib')
-# mpl_skewness_qbins = mpl_render.get_plot(fig_layout_skewness_qbins)
-
-# hvplot.save(fig_layout_skewness_qbins, "fig_qbins_skew.html")
 
 
 ### variance ----------------------------------------
@@ -539,75 +377,75 @@ figlist_var_qbins = get_heatmap(
     combined_df, y_name_var="var_qbins", y_name_label="variance", use_qbins=True
 )
 
-fig_layout_var_qbins = hv.Layout(figlist_var_qbins).cols(2)
-fig_layout_var_qbins
+fig_layout_var_qbins = hv.Layout(figlist_var_qbins[0:3]).cols(1)
+# fig_layout_var_qbins
 # hvplot.save(fig_layout_var_qbins, "fig_qbins_var.html")
+
+### skewness ----------------------------------------
+
+
+figlist_skewness_qbins = get_heatmap(
+    combined_df, y_name_var="skew_qbins", y_name_label="skewness", use_qbins=True
+)
+fig_layout_skewness_qbins = hv.Layout(figlist_skewness_qbins[0:3]).cols(1)
+# fig_layout_skewness_qbins
+
+
+# mpl_render = hv.renderer('matplotlib')
+# mpl_skewness_qbins = mpl_render.get_plot(fig_layout_skewness_qbins)
+
+# hvplot.save(fig_layout_skewness_qbins, "fig_qbins_skew.html")
 
 ### ar1 ----------------------------------------
 figlist_ar1_qbins = get_heatmap(
     combined_df, y_name_var="ar1_qbins", y_name_label="AR(1)", use_qbins=True
 )
-fig_layout_ar1_qbins = hv.Layout(figlist_ar1_qbins).cols(2)
+fig_layout_ar1_qbins = hv.Layout(figlist_ar1_qbins[0:3]).cols(1)
 # hvplot.save(fig_layout_ar1_qbins, "fig_qbins_ar1.html")
 
-##########################################
-# option 3:
-# let's combine points into equal-sized bins
-#########################################
 
-n_bins = 10
-combined_df["tmax_diff_bins"] = pd.cut(
-    combined_df["t2m_x_mean_diff"], n_bins, precision=1
-)
-combined_df["skew_bins"] = pd.cut(combined_df["t2m_x_skew"], n_bins, precision=1)
-combined_df["var_bins"] = pd.cut(combined_df["t2m_x_var"], n_bins, precision=1)
-combined_df["ar1_bins"] = pd.cut(combined_df["t2m_x_ar1"], n_bins, precision=1)
+##########################3
+# fig_qbins ----
+###########################3
 
+# fig_qbins = hv.Layout(figlist_var_qbins[0:3] + figlist_skewness_qbins[0:3]).cols(2)
 
-# combined_df.reset_index()[['lon', 'lat']].value_counts() # there are 14728 land gridcells
-combined_df = combined_df.sort_values(by=["tmax_diff_bins", "skew_bins"])
-combined_df["tmax_diff_bins"] = combined_df["tmax_diff_bins"].astype(str)
-combined_df["skew_bins"] = combined_df["skew_bins"].astype(str)
-combined_df["var_bins"] = combined_df["var_bins"].astype(str)
-combined_df["ar1_bins"] = combined_df["ar1_bins"].astype(str)
+figlist_qbins = [
+    figlist_var_qbins[0],
+    figlist_skewness_qbins[0],
+    figlist_var_qbins[1],
+    figlist_skewness_qbins[1],
+    figlist_var_qbins[2],
+    figlist_skewness_qbins[2],
+]
 
 
-### skewness ----------------------------------------
+# weird ordering bc I want to go vertical instead of horizontal
+# letter ordering = string.ascii_lowercase
+letter_ordering = ["a", "d", "b", "e", "c", "f"]
+updated_fig_qbins_list = []
+for i, subplot in enumerate(figlist_qbins):
+    new_label = f"({letter_ordering[i]})"  # this sets the format to (a), (b), ..
+    updated_subplot = subplot.opts(
+        hooks=[partial(subplot_label_hook, sub_label=new_label)]
+    )
+    updated_fig_qbins_list.append(updated_subplot)
 
-figlist_skewness_bins = get_heatmap(
-    combined_df, y_name_var="skew_bins", y_name_label="skewness", use_qbins=False
-)
-fig_skewness_count_bins = figlist_skewness_bins[0].opts(width=600, height=400)
-fig_layout_skewness_bins = hv.Layout(figlist_skewness_bins[1:]).cols(2)
-fig_layout_skewness_bins
+fig_qbins = hv.Layout(updated_fig_qbins_list).cols(2)
 
-# hvplot.save(fig_layout_skewness_bins, "fig_bins_skew.html")
+fig_qbins_final = fig_qbins.map(
+    lambda x: x.options(
+        fontscale=1,
+        fontsize={
+            "title": title_size,
+            "labels": label_size,
+            "ticks": tick_size,
+            "legend": tick_size,
+        },
+    )
+).opts(hv.opts.HeatMap(frame_width=fwidth_qbins, frame_height=fheight_qbins))
 
-
-### variance ----------------------------------------
-
-figlist_var_bins = get_heatmap(
-    combined_df, y_name_var="var_bins", y_name_label="variance", use_qbins=False
-)
-fig_var_count_bins = figlist_var_bins[0].opts(xlim=(-1, 3), width=600, height=400)
-
-fig_layout_var_bins = hv.Layout(figlist_var_bins[1:]).cols(2)
-fig_layout_var_bins
-# hvplot.save(fig_layout_var_bins, "fig_bins_var.html")
-
-### ar1 ----------------------------------------
-figlist_ar1_bins = get_heatmap(
-    combined_df, y_name_var="ar1_bins", y_name_label="AR(1)", use_qbins=False
-)
-fig_ar1_count = figlist_ar1_bins[0].opts(width=600, height=400)
-
-fig_layout_ar1_bins = hv.Layout(figlist_ar1_bins[1:]).cols(2)
-# hvplot.save(fig_layout_ar1_bins, "fig_bins_ar1.html")
-
-
-##########################################
-# option 4:
-# let's collapse the x axis by compauting "per degree warming"
+# hvplot.save(fig_qbins_final, "fig_qbins.png")
 #########################################
 
 
@@ -617,29 +455,49 @@ def get_scatter(
     x_label,
     deg,
     size=5,
+    alpha_pt=0.02,
     ylim_hwf=(-5, 25),
     ylim_hwd=(-5, 10),
-    ylim_avi=(-2, 3),
+    # ylim_avi=(-2, 3),
     ylim_sumheat=(-5, 70),
+    color_pt="red",
+    color_line="red",
+    label_curve="",
 ):
     fig_hwf_scatter = deg_df.hvplot.scatter(
         x=x_var,
         y="t2m_x.t2m_x_threshold.HWF",
         c="t2m_x_mean_diff",
         s=size,
-        cmap=reds_discrete,
+        alpha=alpha_pt,
+        # cmap=reds_discrete,
+        color=color_pt,
     ).opts(
         xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave frequency (days)",
-        title=f"obs, filtered to {deg - 1}.95 < mean tmax change < {deg}.05\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-        width=600,
-        height=400,
+        ylabel="change in HWF (days)",
+        title=f"obs, filtered to {deg - 1}.75 < mean tmax change < {deg}.25\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+        # width=600,
+        # height=400,
         ylim=ylim_hwf,
     )
+
     hwf_fitted = sm.nonparametric.lowess(
         exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWF"], frac=2 / 3
     )
-    fig_hwf_fitted = hv.Curve(zip(hwf_fitted[:, 0], hwf_fitted[:, 1]))
+    # eval_x = np.linspace(deg_df[x_var].min(), deg_df[x_var].max(), num=500)
+    # hwf_fitted, hwf_bottom, hwf_top = lowess_with_confidence_bounds(
+    #     deg_df[x_var],
+    #     deg_df["t2m_x.t2m_x_threshold.HWF"],
+    #     eval_x,
+    #     lowess_kw={"frac": 2 / 3},
+    # )
+    # fig_hwf_ci = hv.Area(
+    #     x=eval_x, y=hwf_bottom, y2=hwf_top, alpha=0.3, color=color_ci#, label="Uncertainty"
+    # )
+    fig_hwf_fitted = hv.Curve(
+        zip(hwf_fitted[:, 0], hwf_fitted[:, 1]), label=label_curve
+    ).opts(color=color_line)
+    # make figure
     fig_hwf = fig_hwf_scatter * fig_hwf_fitted
 
     # hwd ---------------------------------------------
@@ -648,41 +506,45 @@ def get_scatter(
         y="t2m_x.t2m_x_threshold.HWD",
         c="t2m_x_mean_diff",
         s=size,
-        cmap=reds_discrete,
+        alpha=alpha_pt,
+        # cmap=reds_discrete,
+        color=color_pt,
     ).opts(
         xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave duration (days)",
-        title=f"obs, filtered to {deg - 1}.95 < mean tmax change < {deg}.05\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-        width=600,
-        height=400,
+        ylabel="change in HWD (days)",
+        title=f"obs, filtered to {deg - 1}.75 < mean tmax change < {deg}.25\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+        # width=600,
+        # height=400,
         ylim=ylim_hwd,
     )
     hwd_fitted = sm.nonparametric.lowess(
         exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWD"], frac=2 / 3
     )
-    fig_hwd_fitted = hv.Curve(zip(hwd_fitted[:, 0], hwd_fitted[:, 1]))
+    fig_hwd_fitted = hv.Curve(
+        zip(hwd_fitted[:, 0], hwd_fitted[:, 1]), label=label_curve
+    ).opts(color=color_line)
     fig_hwd = fig_hwd_scatter * fig_hwd_fitted
 
-    # avi ---------------------------------------------
-    fig_avi_scatter = deg_df.hvplot.scatter(
-        x=x_var,
-        y="t2m_x.t2m_x_threshold.AVI",
-        c="t2m_x_mean_diff",
-        s=size,
-        cmap=reds_discrete,
-    ).opts(
-        xlabel=f"climatological {x_label}",
-        ylabel="change in average heatwave intensity (degC)",
-        title=f"obs, filtered to {deg - 1}.95 < mean tmax change < {deg}.05\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
-        width=600,
-        height=400,
-        ylim=ylim_avi,
-    )
-    avi_fitted = sm.nonparametric.lowess(
-        exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.AVI"], frac=2 / 3
-    )
-    fig_avi_fitted = hv.Curve(zip(avi_fitted[:, 0], avi_fitted[:, 1]))
-    fig_avi = fig_avi_scatter * fig_avi_fitted
+    # # avi ---------------------------------------------
+    # fig_avi_scatter = deg_df.hvplot.scatter(
+    #     x=x_var,
+    #     y="t2m_x.t2m_x_threshold.AVI",
+    #     c="t2m_x_mean_diff",
+    #     s=size,
+    #     cmap=reds_discrete,
+    # ).opts(
+    #     xlabel=f"climatological {x_label}",
+    #     ylabel="change in average heatwave intensity (degC)",
+    #     title=f"obs, filtered to {deg - 1}.95 < mean tmax change < {deg}.05\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+    #     width=600,
+    #     height=400,
+    #     ylim=ylim_avi,
+    # )
+    # avi_fitted = sm.nonparametric.lowess(
+    #     exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.AVI"], frac=2 / 3
+    # )
+    # fig_avi_fitted = hv.Curve(zip(avi_fitted[:, 0], avi_fitted[:, 1]))
+    # fig_avi = fig_avi_scatter * fig_avi_fitted
 
     # sumheat ---------------------------------------------
     fig_sumheat_scatter = deg_df.hvplot.scatter(
@@ -690,213 +552,84 @@ def get_scatter(
         y="t2m_x.t2m_x_threshold.sumHeat",
         c="t2m_x_mean_diff",
         s=size,
-        cmap=reds_discrete,
+        alpha=alpha_pt,
+        # cmap=reds_discrete,
+        color=color_pt,
     ).opts(
         xlabel=f"climatological {x_label}",
-        ylabel="change in cumulative heat (degC)",
-        title=f"obs, filtered to {deg - 1}.95 < mean tmax change < {deg}.05\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+        ylabel="change in sumHeat (C)",
+        title=f"obs, filtered to {deg - 1}.75 < mean tmax change < {deg}.25\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
         # ylim=(-5, 25),
-        width=600,
-        height=400,
+        ylim=ylim_sumheat,
+        # width=600,
+        # height=400,
     )
     sumheat_fitted = sm.nonparametric.lowess(
         exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.sumHeat"], frac=2 / 3
     )
-    fig_sumheat_fitted = hv.Curve(zip(sumheat_fitted[:, 0], sumheat_fitted[:, 1]))
+    fig_sumheat_fitted = hv.Curve(
+        zip(sumheat_fitted[:, 0], sumheat_fitted[:, 1]), label=label_curve
+    ).opts(color=color_line)
     fig_sumheat = fig_sumheat_scatter * fig_sumheat_fitted
 
     figlist = [
         fig_hwf,
         fig_hwd,
-        fig_avi,
+        # fig_avi,
         fig_sumheat,
     ]
-    return hv.Layout(figlist).cols(2)
-
-
-deg1_obs_df = combined_df.loc[
-    (combined_df["t2m_x_mean_diff"] >= 0.95) & (combined_df["t2m_x_mean_diff"] <= 1.05)
-]
-
-
-fig_var_1deg_obs = get_scatter(
-    deg1_obs_df, x_var="t2m_x_var", x_label="variance", deg=1
-)
-# hvplot.save(fig_var_1deg_obs, 'fig_var_1deg_obs.html')
-
-fig_skew_1deg_obs = get_scatter(
-    deg1_obs_df, x_var="t2m_x_skew", x_label="skewness", deg=1
-)
-# hvplot.save(fig_skew_1deg_obs, 'fig_skew_1deg_obs.html')
-
-fig_ar1_1deg_obs = get_scatter(deg1_obs_df, x_var="t2m_x_ar1", x_label="AR(1)", deg=1)
-# hvplot.save(fig_ar1_1deg_obs, 'fig_ar1_1deg_obs.html')
+    return hv.Layout(figlist).cols(1)
 
 
 # 2deg --------------------------------
 
 deg2_obs_df = combined_df.loc[
-    (combined_df["t2m_x_mean_diff"] >= 1.95) & (combined_df["t2m_x_mean_diff"] <= 2.05)
+    (combined_df["t2m_x_mean_diff"] >= 1.75) & (combined_df["t2m_x_mean_diff"] <= 2.25)
 ]
 
 fig_skew_2deg_obs = get_scatter(
-    deg2_obs_df, x_var="t2m_x_skew", x_label="skewness", deg=2, size=15
+    deg2_obs_df,
+    x_var="t2m_x_skew",
+    x_label="skewness",
+    deg=2,
+    alpha_pt=0.1,
+    label_curve="observed",
+    ylim_hwf=(0, 35),
+    ylim_hwd=(0, 14),
+    ylim_sumheat=(10, 50),
 )
 # hvplot.save(fig_skew_2deg_obs, 'fig_skew_2deg_obs.html')
 
 fig_var_2deg_obs = get_scatter(
-    deg2_obs_df, x_var="t2m_x_var", x_label="variance", deg=2, size=15
+    deg2_obs_df,
+    x_var="t2m_x_var",
+    x_label="variance",
+    deg=2,
+    size=15,
+    alpha_pt=0.1,
+    label_curve="observed",
+    ylim_hwf=(0, 35),
+    ylim_hwd=(0, 14),
+    ylim_sumheat=(10, 50),
 )
 # hvplot.save(fig_var_2deg_obs, 'fig_var_2deg_obs.html')
 
 fig_ar1_2deg_obs = get_scatter(
-    deg2_obs_df, x_var="t2m_x_ar1", x_label="AR(1)", deg=2, size=15
+    deg2_obs_df,
+    x_var="t2m_x_ar1",
+    x_label="AR(1)",
+    deg=2,
+    size=15,
+    alpha_pt=0.1,
+    label_curve="observed",
+    ylim_hwf=(0, 35),
+    ylim_hwd=(0, 14),
+    ylim_sumheat=(10, 50),
 )
 # hvplot.save(fig_ar1_2deg_obs, 'fig_ar1_2deg_obs.html')
 
 
-######################################################
-# make synthetic verisons of these degree scatterplots
-#####################################################
-
-
-def get_fig_hex_deg(
-    deg_df,
-    x_var,
-    x_label,
-    deg,
-    x_lim=(-1, 0.75),
-    ylim_hwf=(-1, 18),
-    ylim_hwd=(0, 6),
-    ylim_avi=(-0.25, 0.6),
-    ylim_sumheat=(0, 20),
-):
-    fig_hwf_scatter = deg_df.hvplot.hexbin(
-        x=x_var,
-        y="t2m_x.t2m_x_threshold.HWF",
-    ).opts(
-        xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave frequency (days)",
-        title=f"synth, {deg} degree tmax change\n({new_years[0]}:{new_years[1]}) - ({ref_years[0]}:{ref_years[1]})",
-        width=600,
-        height=400,
-        ylim=ylim_hwf,
-        xlim=x_lim,
-        # gridsize = 10
-        min_count=50,
-    )
-    hwf_fitted = sm.nonparametric.lowess(
-        exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWF"], frac=2 / 3
-    )
-    fig_hwf_fitted = hv.Curve(zip(hwf_fitted[:, 0], hwf_fitted[:, 1])).opts(
-        color="black"
-    )
-    fig_hwf = fig_hwf_scatter * fig_hwf_fitted
-
-    # hwd ---------------------------------------------
-
-    fig_hwd_scatter = deg_df.hvplot.hexbin(
-        x=x_var,
-        y="t2m_x.t2m_x_threshold.HWD",
-    ).opts(
-        xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave duration (days)",
-        title=f"synth, {deg} degree tmax change\n({new_years[0]}:{new_years[1]}) - ({ref_years[0]}:{ref_years[1]})",
-        width=600,
-        height=400,
-        ylim=ylim_hwd,
-        xlim=x_lim,
-        # gridsize = 40,
-        min_count=50,
-    )
-    hwd_fitted = sm.nonparametric.lowess(
-        exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWD"], frac=2 / 3
-    )
-    fig_hwd_fitted = hv.Curve(zip(hwd_fitted[:, 0], hwd_fitted[:, 1])).opts(
-        color="black"
-    )
-    fig_hwd = fig_hwd_scatter * fig_hwd_fitted
-
-    # avi ---------------------------------------------
-    fig_avi_scatter = deg_df.hvplot.hexbin(
-        x=x_var,
-        y="t2m_x.t2m_x_threshold.AVI",
-    ).opts(
-        xlabel=f"climatological {x_label}",
-        ylabel="change in average intensity",
-        title=f"synth, {deg} degree tmax change\n({new_years[0]}:{new_years[1]}) - ({ref_years[0]}:{ref_years[1]})",
-        width=600,
-        height=400,
-        ylim=ylim_avi,
-        xlim=x_lim,
-        # gridsize = 40,
-        min_count=50,
-    )
-
-    avi_fitted = sm.nonparametric.lowess(
-        exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.AVI"], frac=2 / 3
-    )
-    fig_avi_fitted = hv.Curve(zip(avi_fitted[:, 0], avi_fitted[:, 1])).opts(
-        color="black"
-    )
-    fig_avi = fig_avi_scatter * fig_avi_fitted
-
-    # cumulative heat ---------------------------------------------
-    fig_sumheat_scatter = deg_df.hvplot.hexbin(
-        x=x_var,
-        y="t2m_x.t2m_x_threshold.sumHeat",
-    ).opts(
-        xlabel=f"climatological {x_label}",
-        ylabel="change in cumulative heat (degC)",
-        title=f"synth, {deg} degree tmax change\n({new_years[0]}:{new_years[1]}) - ({ref_years[0]}:{ref_years[1]})",
-        width=600,
-        height=400,
-        ylim=ylim_sumheat,
-        xlim=x_lim,
-        # gridsize = 40,
-        min_count=50,
-    )
-
-    sumheat_fitted = sm.nonparametric.lowess(
-        exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.sumHeat"], frac=2 / 3
-    )
-    fig_sumheat_fitted = hv.Curve(zip(sumheat_fitted[:, 0], sumheat_fitted[:, 1])).opts(
-        color="black"
-    )
-    fig_sumheat = fig_sumheat_scatter * fig_sumheat_fitted
-
-    figlist = [
-        fig_hwf,
-        fig_hwd,
-        fig_avi,
-        fig_sumheat,
-    ]
-    return hv.Layout(figlist).cols(2)
-
-
-# 1 degree ---------------------------------------------------
-hw_old_1deg = hw_synth_1deg.sel(time=slice(str(ref_years[0]), str(ref_years[1])))
-hw_new_1deg = hw_synth_1deg.sel(time=slice(str(new_years[0]), str(new_years[1])))
-hw_mean_diff_1deg = hw_new_1deg.mean(dim="time") - hw_old_1deg.mean(dim="time")
-
-combined_synth_1deg_ds = xr.merge([climatology_stats, hw_mean_diff_1deg], join="exact")
-combined_synth_1deg_df = combined_synth_1deg_ds.to_dataframe().dropna(how="all")
-
-fig_var_1deg_synth = get_fig_hex_deg(
-    combined_synth_1deg_df, "t2m_x_var", "variance", deg=1, x_lim=(0, 50)
-)
-# hvplot.save(fig_var_1deg_synth, 'fig_var_1deg_synth.html')
-fig_skew_1deg_synth = get_fig_hex_deg(
-    combined_synth_1deg_df, "t2m_x_skew", "skewness", deg=1
-)
-# hvplot.save(fig_skew_1deg_synth, 'fig_skew_1deg_synth.html')
-fig_ar1_1deg_synth = get_fig_hex_deg(
-    combined_synth_1deg_df, "t2m_x_ar1", "AR(1)", deg=1, x_lim=(0.5, 1)
-)
-# hvplot.save(fig_ar1_1deg_synth, 'fig_ar1_1deg_synth.html')
-
-
-# 2 degree ---------------------------------------------------
+# 2 degree, synthetic ---------------------------------------------------
 hw_old_2deg = hw_synth_2deg.sel(time=slice(str(ref_years[0]), str(ref_years[1])))
 hw_new_2deg = hw_synth_2deg.sel(time=slice(str(new_years[0]), str(new_years[1])))
 hw_mean_diff_2deg = hw_new_2deg.mean(dim="time") - hw_old_2deg.mean(dim="time")
@@ -904,128 +637,197 @@ hw_mean_diff_2deg = hw_new_2deg.mean(dim="time") - hw_old_2deg.mean(dim="time")
 combined_synth_2deg_ds = xr.merge([climatology_stats, hw_mean_diff_2deg], join="exact")
 combined_synth_2deg_df = combined_synth_2deg_ds.to_dataframe().dropna(how="all")
 
-fig_var_2deg_synth = get_fig_hex_deg(
+fig_var_2deg_synth = get_scatter(
     combined_synth_2deg_df,
     "t2m_x_var",
     "variance",
     deg=2,
-    x_lim=(0, 55),
-    ylim_hwf=(0, 50),
-    ylim_hwd=(0, 20),
-    ylim_avi=(0, 0.8),
-    ylim_sumheat=(10, 60),
-)
-# hvplot.save(fig_var_2deg_synth, 'fig_var_2deg_synth.html')
-fig_skew_2deg_synth = get_fig_hex_deg(
-    combined_synth_2deg_df,
-    "t2m_x_skew",
-    "skewness",
-    deg=2,
-    ylim_hwf=(0, 30),
-    ylim_hwd=(0, 13),
-    ylim_avi=(0, 1),
+    color_pt="blue",
+    color_line="blue",
+    alpha_pt=0.04,
+    label_curve="synthetic",
+    ylim_hwf=(0, 35),
+    ylim_hwd=(0, 14),
     ylim_sumheat=(10, 50),
 )
-# hvplot.save(fig_skew_2deg_synth, 'fig_skew_2deg_synth.html')
-fig_ar1_2deg_synth = get_fig_hex_deg(
+fig_var_2deg_synth.map(lambda x: x.opts(xlim=(-1, 70)), hv.Curve)
+
+# temp ---------------------------------------------------
+combined_synth_2deg_df["t2m_x_sd"] = np.sqrt(combined_synth_2deg_df["t2m_x_var"])
+fig_sd_2deg_synth = get_scatter(
     combined_synth_2deg_df,
-    "t2m_x_ar1",
-    "AR(1)",
+    "t2m_x_sd",
+    "sd",
     deg=2,
-    x_lim=(0.5, 1),
-    ylim_hwf=(0, 25),
-    ylim_hwd=(0, 12),
-    ylim_avi=(-0.2, 1),
-    ylim_sumheat=(10, 45),
+    color_pt="blue",
+    color_line="blue",
+    alpha_pt=0.04,
+    label_curve="synthetic",
+    ylim_hwf=(0, 35),
+    ylim_hwd=(0, 14),
+    ylim_sumheat=(10, 50),
 )
-# hvplot.save(fig_ar1_2deg_synth, 'fig_ar1_2deg_synth.html')
-
-# plotting just the lines ------------
+# end temp ------------------------------
 
 
-def combine_curves(fig_1deg, fig_2deg, x_label, col1="blue", col2="red"):
-    hwf_var = hv.NdOverlay(
-        {
-            "1deg": fig_1deg[0].Curve.I.opts(color=col1),
-            "2deg": fig_2deg[0].Curve.I.opts(color=col2),
-        },
-        kdims="tmax shift",
-    ).opts(
-        title=f"synth loess: heatwave frequency ~ {x_label}",
-        xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave frequency",
-    )
-
-    hwd_var = hv.NdOverlay(
-        {
-            "1deg": fig_1deg[1].Curve.I.opts(color=col1),
-            "2deg": fig_2deg[1].Curve.I.opts(color=col2),
-        },
-        kdims="tmax shift",
-    ).opts(
-        title=f"obs loess: heatwave duration ~ {x_label}",
-        xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave duration",
-    )
-
-    avi_var = hv.NdOverlay(
-        {
-            "1deg": fig_1deg[2].Curve.I.opts(color=col1),
-            "2deg": fig_2deg[2].Curve.I.opts(color=col2),
-        },
-        kdims="tmax shift",
-    ).opts(
-        title=f"obs loess: heatwave avg intensity ~ {x_label}",
-        xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave avg intensity (degC)",
-    )
-
-    sumheat_var = hv.NdOverlay(
-        {
-            "1deg": fig_1deg[3].Curve.I.opts(color=col1),
-            "2deg": fig_2deg[3].Curve.I.opts(color=col2),
-        },
-        kdims="tmax shift",
-    ).opts(
-        title=f"obs loess: heatwave cumulative heat ~ {x_label}",
-        xlabel=f"climatological {x_label}",
-        ylabel="change in heatwave cumulative heat (degC)",
-    )
-
-    fig_var_curves_deg = (
-        (hwf_var + hwd_var + avi_var + sumheat_var)
-        .cols(2)
-        .opts(shared_axes=False, width=600, height=400)
-    )
-    return fig_var_curves_deg
-
-
-fig_var_curves_deg = combine_curves(
-    fig_var_1deg_obs, fig_var_2deg_obs, x_label="variance"
-).opts(width=800)
-# hvplot.save(fig_var_curves_deg, "fig_var_curves_deg.html")
-
-fig_skew_curves_deg = combine_curves(
-    fig_skew_1deg_obs, fig_skew_2deg_obs, x_label="skewness"
+fig_skew_2deg_synth = get_scatter(
+    combined_synth_2deg_df,
+    x_var="t2m_x_skew",
+    x_label="skewness",
+    deg=2,
+    color_pt="blue",
+    color_line="blue",
+    alpha_pt=0.04,
+    label_curve="synthetic",
+    ylim_hwf=(0, 35),
+    ylim_hwd=(0, 14),
+    ylim_sumheat=(10, 50),
 )
-# hvplot.save(fig_skew_curves_deg, "fig_skew_curves_deg.html")
+fig_skew_2deg_synth.map(lambda x: x.opts(xlim=(-1, 0.75)), hv.Curve)
 
-fig_ar1_curves_deg = combine_curves(fig_ar1_1deg_obs, fig_ar1_2deg_obs, x_label="AR(1)")
-# hvplot.save(fig_ar1_curves_deg, "fig_ar1_curves_deg.html")
 
-# synth
+# temp ---------------------------------------------------
 
-fig_var_curves_deg_synth = combine_curves(
-    fig_var_1deg_synth, fig_var_2deg_synth, x_label="variance"
-).opts(width=800)
-# hvplot.save(fig_var_curves_deg_synth, "fig_var_curves_deg_synth.html")
-
-fig_skew_curves_deg_synth = combine_curves(
-    fig_skew_1deg_synth, fig_skew_2deg_synth, x_label="skewness"
+skew_hwf_2deg_synth_fitted = sm.nonparametric.lowess(
+    exog=combined_synth_2deg_df["t2m_x_skew"],
+    endog=combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWF"],
+    frac=2 / 3,
 )
-# hvplot.save(fig_skew_curves_deg_synth, "fig_skew_curves_deg_synth.html")
-
-fig_ar1_curves_deg_synth = combine_curves(
-    fig_ar1_1deg_synth, fig_ar1_2deg_synth, x_label="AR(1)"
+# get gradients
+skew_hwf_2deg_synth_grad = np.gradient(
+    skew_hwf_2deg_synth_fitted[:, 1], skew_hwf_2deg_synth_fitted[:, 0]
 )
-# hvplot.save(fig_ar1_curves_deg_synth, "fig_ar1_curves_deg_synth.html")
+
+# compare to linear fit
+np.polyfit(
+    combined_synth_2deg_df["t2m_x_skew"],
+    combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWF"],
+    deg=1,
+)
+np.polyfit(deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.HWF"], deg=1)
+
+
+np.polyfit(
+    combined_synth_2deg_df["t2m_x_skew"],
+    combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWD"],
+    deg=1,
+)
+np.polyfit(deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.HWD"], deg=1)
+
+np.polyfit(
+    combined_synth_2deg_df["t2m_x_skew"],
+    combined_synth_2deg_df["t2m_x.t2m_x_threshold.sumHeat"],
+    deg=1,
+)
+np.polyfit(
+    deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.sumHeat"], deg=1
+)
+
+hv.Curve(zip(skew_hwf_2deg_synth_fitted[:, 0], skew_hwf_2deg_synth_grad))
+
+hv.Curve(zip(skew_hwf_2deg_synth_fitted[:, 0], skew_hwf_2deg_synth_fitted[:, 1]))
+
+
+np.polyfit(
+    combined_synth_2deg_df["t2m_x_skew"],
+    combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWD"],
+    deg=1,
+)
+np.polyfit(deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.HWD"], deg=1)
+
+
+# end temp ------------------------------
+
+fig_ar1_2deg_synth = get_scatter(
+    combined_synth_2deg_df,
+    x_var="t2m_x_ar1",
+    x_label="AR(1)",
+    deg=2,
+    color_pt="blue",
+    color_line="blue",
+    alpha_pt=0.04,
+    label_curve="synthetic",
+    ylim_hwf=(0, 35),
+    ylim_hwd=(0, 14),
+    ylim_sumheat=(10, 50),
+)
+fig_ar1_2deg_synth.map(lambda x: x.opts(xlim=(0.55, 0.9)), hv.Curve)
+
+
+# combine figures
+# see the original title in _obs for better descriptions
+
+fig_var_hwf_2deg = (fig_var_2deg_synth[0] * fig_var_2deg_obs[0]).opts(
+    legend_position="top_right", title="Change in HWF"
+)
+fig_var_hwd_2deg = (fig_var_2deg_synth[1] * fig_var_2deg_obs[1]).opts(
+    legend_position="top_right", title="Change in HWD"
+)
+fig_var_heatsum_2deg = (fig_var_2deg_synth[2] * fig_var_2deg_obs[2]).opts(
+    legend_position="top_right", title="Change in sumHeat"
+)
+
+fig_skew_hwf_2deg = (fig_skew_2deg_synth[0] * fig_skew_2deg_obs[0]).opts(
+    legend_position="top_right", title="Change in HWF"
+)
+fig_skew_hwd_2deg = (fig_skew_2deg_synth[1] * fig_skew_2deg_obs[1]).opts(
+    legend_position="top_right", title="Change in HWD"
+)
+fig_skew_heatsum_2deg = (fig_skew_2deg_synth[2] * fig_skew_2deg_obs[2]).opts(
+    legend_position="top_right", title="Change in sumHeat"
+)
+
+fig_ar1_hwf_2deg = (fig_ar1_2deg_synth[0] * fig_ar1_2deg_obs[0]).opts(
+    legend_position="top_right", title="Change in HWF"
+)
+fig_ar1_hwd_2deg = (fig_ar1_2deg_synth[1] * fig_ar1_2deg_obs[1]).opts(
+    legend_position="top_right", title="Change in HWD"
+)
+fig_ar1_heatsum_2deg = (fig_ar1_2deg_synth[2] * fig_ar1_2deg_obs[2]).opts(
+    legend_position="top_right", title="Change in sumHeat"
+)
+
+fig_2deg = (
+    fig_var_hwf_2deg
+    + fig_skew_hwf_2deg
+    + fig_var_hwd_2deg
+    + fig_skew_hwd_2deg
+    + fig_var_heatsum_2deg
+    + fig_skew_heatsum_2deg
+    # + fig_ar1_hwf_2deg
+    # + fig_ar1_hwd_2deg
+    # + fig_ar1_heatsum_2deg
+).cols(2)
+
+# weird ordering bc I want to go vertical instead of horizontal
+# letter ordering = string.ascii_lowercase
+letter_ordering = ["a", "d", "b", "e", "c", "f"]
+updated_fig_2deg_list = []
+for i, subplot in enumerate(fig_2deg):
+    new_label = f"({letter_ordering[i]})"  # this sets the format to (a), (b), ..
+    updated_subplot = subplot.opts(
+        hooks=[partial(subplot_label_hook, sub_label=new_label)]
+    )
+    updated_fig_2deg_list.append(updated_subplot)
+
+fig_2deg_updated = hv.Layout(updated_fig_2deg_list).cols(2)
+
+
+######################
+# fig_2deg ----
+######################
+
+
+fig_2deg_final = fig_2deg_updated.map(
+    lambda x: x.options(
+        fontsize={
+            "title": title_size,
+            "labels": label_size,
+            "ticks": tick_size,
+            "legend": tick_size,
+        },
+    )
+).opts(
+    opts.Curve(frame_width=fwidth_qbins, frame_height=fheight_qbins),
+)
+# hvplot.save(fig_2deg_final, 'fig_2deg.png')

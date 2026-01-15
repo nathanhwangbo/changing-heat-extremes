@@ -2,8 +2,7 @@ import cdsapi
 
 dataset = "derived-era5-single-levels-daily-statistics"
 
-# first_year = 1950
-first_year = 2023
+first_year = 1950
 last_year = 2025
 for year in range(first_year, last_year + 1):
     print(f"working on year {year}")
@@ -60,12 +59,11 @@ for year in range(first_year, last_year + 1):
         ],
         "daily_statistic": "daily_maximum",
         "time_zone": "utc+00:00",
-        "frequency": "6_hourly",
-        # "grid": [1.0, 1.0],
+        "frequency": "1_hourly",
+        "grid": [1.0, 1.0],
     }
 
     client = cdsapi.Client()
     client.retrieve(dataset, request).download(
         target=f"D://data//ERA5//t2m_x_daily//t2m_x_daily_{year}.nc"
     )
-    # client.retrieve(dataset, request).download()

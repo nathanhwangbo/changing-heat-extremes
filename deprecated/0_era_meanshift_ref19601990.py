@@ -1,17 +1,20 @@
+##################################################
+# DEPRECATED!!!
+#  in favor of 0_era_meanshift.py, which doesn't use a reference period.
+##############################################3
+
+
 # script to calculate summer heatwave metrics from ERA
 
-###### notable choices ########################asdf######################
+###### notable choices ##############################################
 
 # era daily tmax is preprocessed to remove day-of-year climatology
-#   by smoothing the 1960-2025 doy-means using 5 fourier basis functions
+#   by smoothing the 1950-1985 doy-means using 5 fourier basis functions
 
 # heatwaves are defined as 3+ consecutive days where the tmax anomalies exceed Q90
 #   q90 is location and doy-specific, and are defined via a 7 day rolling window around each doy
-#   across the years 1960-2025.
-
+#   across the years 1950-1985.
 #
-#
-
 # because these thresholds are (location, doy)-specific, they can be thought of as their own type of doy climatology
 #     So... these thresholds are also smoothed using 5 fourier basis functions.
 ################################################################################
