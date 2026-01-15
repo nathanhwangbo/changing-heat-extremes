@@ -9,11 +9,23 @@
 #   q90 is location and doy-specific, and are defined via a 7 day rolling window around each doy
 #   across the years 1960-2025.
 
-#
-#
-
 # because these thresholds are (location, doy)-specific, they can be thought of as their own type of doy climatology
 #     So... these thresholds are also smoothed using 5 fourier basis functions.
+
+# this script makes a non-standard choice in the way that all "climatological" quantities are calculated
+#    (i.e. doy-climatology, q90, skewness and variance)
+#    the standard choice is to calculate these quantities over a reference period (e.g. 1960-1990),
+#    which minimizes the influence of human-driven climate change on our estimates of the climatology
+#
+# we wanted to maximize the amount of data available to estimate quantities like skewness, so we instead:
+#    use the full time period 1960-2025 to estimate climatological quantities
+#    but remove a year-specific mean prior to this estimation.
+#  e.g the raw tmax time series in 1960 has the 1960 mean removed. the raw tmax time series in 1961 has the 1961 mean removed
+#  This has the effect of removing the climate change signal while still giving us access to modern years.
+#  And we use this time series without the yearly means to then define the doy-climatology, q90, variance, and skewness
+
+# To apply these climatological quantities in our analysis of the change in heatwave statistics (which SHOULD include climate change),
+#    we shift the entire raw tmax daily time series to be mean zero, and then remove the previously defined doy-climatology, and so on.
 ################################################################################
 
 import numpy as np
@@ -151,14 +163,125 @@ def fourier_climatology_smoother(da, n_time, n_bases=5):
     return da_rec
 
 
+def process_heatwave_metrics(da_metrics):
+    """
+    - calculate cumulative heat
+    - convert average intensity to a metric which excludes zeros
+    - add a landmask
+    :param: da_metrics is the output of hdp's compute_group_metrics()
+    returns: a version of da_metrics with added variables, but same coordinates
+    """
+
+    # in these intensity metrics (AVI and AVA, zeros mean that there were no heatwaves that year)
+    # so let's turn those 0s to nans
+    da_metrics["t2m_x.t2m_x_threshold.AVI"] = da_metrics[
+        "t2m_x.t2m_x_threshold.AVI"
+    ].where(da_metrics["t2m_x.t2m_x_threshold.AVI"] != 0)
+
+    da_metrics["t2m_x.t2m_x_threshold.AVA"] = da_metrics[
+        "t2m_x.t2m_x_threshold.AVA"
+    ].where(da_metrics["t2m_x.t2m_x_threshold.AVA"] != 0)
+
+    # compute cumulative heat
+    da_metrics["t2m_x.t2m_x_threshold.sumHeat"] = (
+        da_metrics["t2m_x.t2m_x_threshold.AVA"]
+        * da_metrics["t2m_x.t2m_x_threshold.HWF"]
+    )
+
+    metrics_synth_land = add_landmask(da_metrics)
+    return metrics_synth_land
+
+
+def get_synthetic(da_ref, da_synth_new, start_year_new, use_calendar_summer=True):
+    synth_time = xr.date_range(
+        start=str(start_year_new),
+        periods=da_ref.time.size,
+        freq="D",
+        calendar="noleap",
+        use_cftime=True,
+    )
+    era_land_synth_new = da_synth_new.assign_coords(
+        time=synth_time
+        # time=era_land_new.time
+    )  # pretend its the new time period
+
+    # combine back. this is comparable to era_land_all_anom above, except with a small gap in the middle (1990-95)
+    era_land_synth_anom = xr.concat([da_ref, era_land_synth_new], dim="time")
+
+    era_land_synth_anom["t2m_x"].attrs = {
+        "units": "C"
+    }  # hdp package needs units, and anom are same in K or C
+
+    # calculate heatwave metrics
+    measures_synth = hdp.measure.format_standard_measures(
+        temp_datasets=[era_land_synth_anom["t2m_x"]]
+    ).chunk({"time": -1, "lat": 10, "lon": 10})
+
+    # if there isnt a gap between the 2 periods, then you can just pass measures_synth to compute_group_metrics
+    # but if there's a gap, then need to split into old and new
+    measures_synth_old = measures_synth.sel(
+        time=slice(str(ref_years[0] - 1), str(ref_years[1]))
+    )
+    measures_synth_new = measures_synth.sel(
+        time=slice(str(new_years[0] - 1), str(new_years[1]))
+    )
+
+    if use_calendar_summer:
+        metrics_synth_old = hdp.metric.compute_group_metrics(
+            measures_synth_old,
+            thresholds_ref,
+            definitions,
+            use_doy=False,
+            start=(6, 1),
+            end=(9, 1),
+        )
+        metrics_synth_new = hdp.metric.compute_group_metrics(
+            measures_synth_new,
+            thresholds_ref,
+            definitions,
+            use_doy=False,
+            start=(6, 1),
+            end=(9, 1),
+        )
+        metrics_dataset_synth = xr.concat(
+            [metrics_synth_old, metrics_synth_new], dim="time"
+        )
+
+    else:
+        metrics_synth_old = hdp.metric.compute_group_metrics(
+            measures_synth_old,
+            thresholds_ref,
+            definitions,
+            use_doy=True,
+            doy_mask=era_summer_mask,
+        )
+        metrics_synth_new = hdp.metric.compute_group_metrics(
+            measures_synth_new,
+            thresholds_ref,
+            definitions,
+            use_doy=True,
+            doy_mask=era_summer_mask,
+        )
+        metrics_dataset_synth = xr.concat(
+            [metrics_synth_old, metrics_synth_new], dim="time"
+        )
+
+    metrics_synth_land = process_heatwave_metrics(metrics_dataset_synth)
+
+    return metrics_synth_land
+
+
 #######################################
 # read in ERA data
 #######################################
 
-# era_filelist = glob.glob("D:data\\ERA5\\t2m_x_1x1\\*.nc")
+era_filelist = glob.glob("D:data\\ERA5\\t2m_x_1x1\\*.nc")
 # era = xr.open_mfdataset(era_filelist).drop_vars("expver")
-era_filelist = glob.glob("D:data\\ERA5\\t2m_x_1x1_2025\\*.nc")
-era = xr.open_mfdataset(era_filelist).rename({"t2m": "t2m_x"})
+era = (
+    xr.open_mfdataset(era_filelist)
+    .rename({"__xarray_dataarray_variable__": "t2m_x", "valid_time": "time"})
+    .reset_coords(names="number", drop=True)
+)
 
 
 # fixing formatting for the hdp package
@@ -177,30 +300,55 @@ era = era.assign_coords(lon=(((era.lon + 180) % 360) - 180)).sortby("lon")
 era_land = add_landmask(era).compute()
 
 
-################################################
-# calculate extremal metrics at each gridcell
-###############################################
+##############################################
+# Calculate climatological characteristics
+# this will be used to calculate doy-climatology, q90,
+# (and climatological variance and skewness, in 2_era_moments.py)
+#############################################
 
 # defining the location-specific heat threshold ---------------
-# using reference period 1950-1987
+# using time period 1960-2025
+
+# # note! if using jja in nh and djf in southern hemisphere, then we should also include the year before in the ref period
+# # bc djf 1950 requires december of 1949.
 era_land_climatology_years = era_land.sel(
-    time=slice(str(ref_years[0]), str(ref_years[1]))
+    time=slice(str(ref_years[0] - 1), str(new_years[1]))
 )
 
-#### Note! we're taking anomalies with respect to the REFERENCE time period
+# make the whole time series zero mean, across 1960-2025. apply separately to each gridcell
+era_land_climatology_years_zeromean = (
+    era_land_climatology_years - era_land_climatology_years.mean(dim="time")
+).reset_coords("year", drop=True)
+
+# capture "global warming" at each grid cell by getting the mean at each year
+era_land_yearly_mean = era_land_climatology_years_zeromean.groupby("time.year").mean()
+era_land_no_yearly_mean = (
+    era_land_climatology_years_zeromean.groupby("time.year") - era_land_yearly_mean
+)
+
+#### Note! we're taking anomalies with respect to the entire time period
 # ref_doy_climatology = era_land_ref.groupby("time.dayofyear").mean()
 ref_doy_climatology = fourier_climatology_smoother(
-    era_land_climatology_years["t2m_x"], n_time=365, n_bases=5
+    era_land_no_yearly_mean["t2m_x"], n_time=365, n_bases=5
 )
 
-# note! if using jja in nh and djf in southern hemisphere, then we should also include the year before in the ref period
-# bc djf 1950 requires december of 1949.
-era_land_ref = era_land.sel(time=slice(str(ref_years[0] - 1), str(ref_years[1])))
-# take anomalies
+# # note! if using jja in nh and djf in southern hemisphere, then we should also include the year before in the ref period
+# # bc djf 1950 requires december of 1949.
+# era_land_ref = era_land.sel(time=slice(str(ref_years[0] - 1), str(new_years[1])))
+
+# take doy anomalies
 era_land_ref_anom = (
-    era_land_ref.groupby("time.dayofyear") - ref_doy_climatology
+    era_land_no_yearly_mean.groupby("time.dayofyear") - ref_doy_climatology
 ).drop_vars("dayofyear")
 era_land_ref_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
+
+
+# NOTE!
+# this dataset (1960-2025 mean removed -> individual yearly means removed -> doy mean removed)
+#   is the dataset that should be used to estimate "climatological" characteristics
+
+# era_land_ref_anom.to_netcdf("era_land_anom_for_climatology.nc")
+
 
 # conversion to celcius
 measures_ref = hdp.measure.format_standard_measures(
@@ -240,13 +388,26 @@ definitions = [[3, 0, 0]]  # heatwave is 3 consec days
 
 # --------------------------------------------------
 
+
+################################################
+# calculate extremal metrics at each gridcell
+###############################################
+
+# compared to era_land_ref_anom, the dataset we're using to calculate heatwave metrics "skips" the step where we subtract a separate mean for each year.
+# so instead, we just have:
+#   daily time series -> shifted by a scalar to have zero mean across 1960-2025 -> remove doy climatology
+# where the doy climatology was calculated from the third step in:
+#  daily time series -> shifted by a scalar to have zero mean across 1960-2025 -> shifted by a year-specific value to have zero mean each year -> remove doy climatology -> calculate q90 threshold
+
+
 ############################
 # observations (not synthetic)
-# time period ALL 1950-2025, to match russo (but with slighty different threshold period--------------------------------
+# time period ALL 1950-2025,
 ##############################
-era_land_all = era_land.sel(time=slice(str(ref_years[0] - 1), str(new_years[1])))
+
+# era_land_all = era_land.sel(time=slice(str(ref_years[0] - 1), str(new_years[1])))
 era_land_all_anom = (
-    era_land_all.groupby("time.dayofyear") - ref_doy_climatology
+    era_land_climatology_years_zeromean.groupby("time.dayofyear") - ref_doy_climatology
 ).drop_vars("dayofyear")
 
 # save this for future
@@ -273,22 +434,7 @@ else:
         doy_mask=era_summer_mask,
     )
 
-# turn 0s in AVI to nan
-metrics_dataset_all["t2m_x.t2m_x_threshold.AVI"] = metrics_dataset_all[
-    "t2m_x.t2m_x_threshold.AVI"
-].where(metrics_dataset_all["t2m_x.t2m_x_threshold.AVI"] != 0)
-
-metrics_dataset_all["t2m_x.t2m_x_threshold.AVA"] = metrics_dataset_all[
-    "t2m_x.t2m_x_threshold.AVA"
-].where(metrics_dataset_all["t2m_x.t2m_x_threshold.AVA"] != 0)
-
-# compute cumulative heat
-metrics_dataset_all["t2m_x.t2m_x_threshold.sumHeat"] = (
-    metrics_dataset_all["t2m_x.t2m_x_threshold.AVA"]
-    * metrics_dataset_all["t2m_x.t2m_x_threshold.HWF"]
-)
-
-metrics_all_land = add_landmask(metrics_dataset_all)
+metrics_all_land = process_heatwave_metrics(metrics_dataset_all)
 # metrics_all_land.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_anom{suffix}.nc")
 
 
@@ -296,214 +442,52 @@ metrics_all_land = add_landmask(metrics_dataset_all)
 # synthetic, meanshift
 #############
 
+# note that we do this on the shifted, doy-anomaly removed ts.
+
 # time period 2,
-era_land_new = era_land.sel(time=slice(str(new_years[0]), str(new_years[1])))
-
-# shifting the mean for each grid cell
-old_means = era_land_ref["t2m_x"].mean(dim=["time"])
-new_means = era_land_new["t2m_x"].mean(dim=["time"])
-
-# update the "time" coordinate in the future to pretend it's the "future"
-era_land_synth_new = era_land_climatology_years - old_means + new_means
-synth_time = xr.date_range(
-    start=str(new_years[0]),
-    periods=era_land_climatology_years.time.size,
-    freq="D",
-    calendar="noleap",
-    use_cftime=True,
-)
-era_land_synth_new = era_land_synth_new.assign_coords(
-    time=synth_time
-    # time=era_land_new.time
-)  # pretend its the new time period
-
-
-# combine back. this is comparable to era_land_all below
-era_land_synth = xr.concat([era_land_ref, era_land_synth_new], dim="time")
-era_land_synth_anom = (
-    era_land_synth.groupby("time.dayofyear") - ref_doy_climatology
-).drop_vars("dayofyear")
-era_land_synth_anom["t2m_x"].attrs = {
-    "units": "C"
-}  # hdp package needs units, and anom are same in K or C
-
-# calculate heatwave metrics
-measures_synth = hdp.measure.format_standard_measures(
-    temp_datasets=[era_land_synth_anom["t2m_x"]]
-).chunk({"time": -1, "lat": 10, "lon": 10})
-
-# if there isnt a gap between the 2 periods, then you can just pass measures_synth to compute_group_metrics
-# but if there's a gap, then need to split into old and new
-measures_synth_old = measures_synth.sel(
+# era_land_new = era_land.sel(time=slice(str(new_years[0]), str(new_years[1])))
+era_land_ref_anom = era_land_all_anom.sel(
     time=slice(str(ref_years[0] - 1), str(ref_years[1]))
 )
-measures_synth_new = measures_synth.sel(
+era_land_new_anom = era_land_all_anom.sel(
     time=slice(str(new_years[0] - 1), str(new_years[1]))
 )
 
-if use_calendar_summer:
-    metrics_synth_old = hdp.metric.compute_group_metrics(
-        measures_synth_old,
-        thresholds_ref,
-        definitions,
-        use_doy=False,
-        start=(6, 1),
-        end=(9, 1),
-    )
-    metrics_synth_new = hdp.metric.compute_group_metrics(
-        measures_synth_new,
-        thresholds_ref,
-        definitions,
-        use_doy=False,
-        start=(6, 1),
-        end=(9, 1),
-    )
-    metrics_dataset_synth = xr.concat(
-        [metrics_synth_old, metrics_synth_new], dim="time"
-    )
+## shifting the mean for each grid cell.
+## note: this is in anomaly space!! shifted, doy-anomaly removed.
+old_means = era_land_ref_anom["t2m_x"].mean(dim=["time"])
+new_means = era_land_new_anom["t2m_x"].mean(dim=["time"])
+# old_means = era_land_ref["t2m_x"].mean(dim=["time"])
+# new_means = era_land_new["t2m_x"].mean(dim=["time"])
 
-    # metrics_dataset_synth = hdp.metric.compute_group_metrics(
-    #     measures_synth,
-    #     thresholds_ref,
-    #     definitions,
-    #     use_doy=False,
-    #     start=(6, 1),
-    #     end=(9, 1),
-    # )
-else:
-    metrics_synth_old = hdp.metric.compute_group_metrics(
-        measures_synth_old,
-        thresholds_ref,
-        definitions,
-        use_doy=True,
-        doy_mask=era_summer_mask,
-    )
-    metrics_synth_new = hdp.metric.compute_group_metrics(
-        measures_synth_new,
-        thresholds_ref,
-        definitions,
-        use_doy=True,
-        doy_mask=era_summer_mask,
-    )
-    metrics_dataset_synth = xr.concat(
-        [metrics_synth_old, metrics_synth_new], dim="time"
-    )
+# update the "time" coordinate in the future to pretend it's the "future"
+era_land_synth_new = (era_land_ref_anom - old_means) + new_means
 
-
-# in these intensity metrics (AVI and AVA, zeros mean that there were no heatwaves that year)
-# so let's turn those 0s to nans
-metrics_dataset_synth["t2m_x.t2m_x_threshold.AVI"] = metrics_dataset_synth[
-    "t2m_x.t2m_x_threshold.AVI"
-].where(metrics_dataset_synth["t2m_x.t2m_x_threshold.AVI"] != 0)
-
-metrics_dataset_synth["t2m_x.t2m_x_threshold.AVA"] = metrics_dataset_synth[
-    "t2m_x.t2m_x_threshold.AVA"
-].where(metrics_dataset_synth["t2m_x.t2m_x_threshold.AVA"] != 0)
-
-# compute cumulative heat
-metrics_dataset_synth["t2m_x.t2m_x_threshold.sumHeat"] = (
-    metrics_dataset_synth["t2m_x.t2m_x_threshold.AVA"]
-    * metrics_dataset_synth["t2m_x.t2m_x_threshold.HWF"]
+metrics_synth_land = get_synthetic(
+    era_land_ref_anom,
+    era_land_synth_new,
+    start_year_new=new_years[0] - 1,
+    use_calendar_summer=True,
 )
 
-metrics_synth_land = add_landmask(metrics_dataset_synth)
 # metrics_synth_land.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_anom{suffix}.nc")
 
 
 ###########
 # synthetic, 1deg shift
+# i.e. the "future" time period (1995-2025) is the same as 1960-1990 but shifted by 1deg
 #############
 
 # update the "time" coordinate in the future to pretend it's the "future"
 # shifted by 1 degree.
-era_land_synth_new_1deg = era_land_climatology_years + 1
-era_land_synth_new_1deg = era_land_synth_new_1deg.assign_coords(
-    time=synth_time
-    # time=era_land_new.time
-)  # pretend its the new time period
+era_land_synth_new_1deg = era_land_ref_anom + 1
 
-# combine back. this is comparable to era_land_all below
-era_land_synth_1deg = xr.concat([era_land_ref, era_land_synth_new_1deg], dim="time")
-era_land_synth_anom_1deg = (
-    era_land_synth_1deg.groupby("time.dayofyear") - ref_doy_climatology
-).drop_vars("dayofyear")
-era_land_synth_anom_1deg["t2m_x"].attrs = {
-    "units": "C"
-}  # hdp package needs units, and anom are same in K or C
-
-# calculate heatwave metrics
-measures_synth_1deg = hdp.measure.format_standard_measures(
-    temp_datasets=[era_land_synth_anom_1deg["t2m_x"]]
-).chunk({"time": -1, "lat": 10, "lon": 10})
-
-# if there isnt a gap between the 2 periods, then you can just pass measures_synth to compute_group_metrics
-# but if there's a gap, then need to split into old and new
-measures_synth_old_1deg = measures_synth_1deg.sel(
-    time=slice(str(ref_years[0] - 1), str(ref_years[1]))
+metrics_synth_land_1deg = get_synthetic(
+    era_land_ref_anom,
+    era_land_synth_new_1deg,
+    start_year_new=new_years[0] - 1,
+    use_calendar_summer=True,
 )
-measures_synth_new_1deg = measures_synth_1deg.sel(
-    time=slice(str(new_years[0] - 1), str(new_years[1]))
-)
-
-if use_calendar_summer:
-    metrics_synth_old_1deg = hdp.metric.compute_group_metrics(
-        measures_synth_old_1deg,
-        thresholds_ref,
-        definitions,
-        use_doy=False,
-        start=(6, 1),
-        end=(9, 1),
-    )
-    metrics_synth_new_1deg = hdp.metric.compute_group_metrics(
-        measures_synth_new_1deg,
-        thresholds_ref,
-        definitions,
-        use_doy=False,
-        start=(6, 1),
-        end=(9, 1),
-    )
-    metrics_dataset_synth_1deg = xr.concat(
-        [metrics_synth_old_1deg, metrics_synth_new_1deg], dim="time"
-    )
-
-
-else:
-    metrics_synth_old_1deg = hdp.metric.compute_group_metrics(
-        measures_synth_old_1deg,
-        thresholds_ref,
-        definitions,
-        use_doy=True,
-        doy_mask=era_summer_mask,
-    )
-    metrics_synth_new_1deg = hdp.metric.compute_group_metrics(
-        measures_synth_new_1deg,
-        thresholds_ref,
-        definitions,
-        use_doy=True,
-        doy_mask=era_summer_mask,
-    )
-    metrics_dataset_synth_1deg = xr.concat(
-        [metrics_synth_old_1deg, metrics_synth_new_1deg], dim="time"
-    )
-
-
-# in these intensity metrics (AVI and AVA, zeros mean that there were no heatwaves that year)
-# so let's turn those 0s to nans
-metrics_dataset_synth_1deg["t2m_x.t2m_x_threshold.AVI"] = metrics_dataset_synth_1deg[
-    "t2m_x.t2m_x_threshold.AVI"
-].where(metrics_dataset_synth_1deg["t2m_x.t2m_x_threshold.AVI"] != 0)
-
-metrics_dataset_synth_1deg["t2m_x.t2m_x_threshold.AVA"] = metrics_dataset_synth_1deg[
-    "t2m_x.t2m_x_threshold.AVA"
-].where(metrics_dataset_synth_1deg["t2m_x.t2m_x_threshold.AVA"] != 0)
-
-# compute cumulative heat
-metrics_dataset_synth_1deg["t2m_x.t2m_x_threshold.sumHeat"] = (
-    metrics_dataset_synth_1deg["t2m_x.t2m_x_threshold.AVA"]
-    * metrics_dataset_synth_1deg["t2m_x.t2m_x_threshold.HWF"]
-)
-
-metrics_synth_land_1deg = add_landmask(metrics_dataset_synth_1deg)
 # metrics_synth_land_1deg.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_1deg_anom{suffix}.nc")
 
 
@@ -513,215 +497,11 @@ metrics_synth_land_1deg = add_landmask(metrics_dataset_synth_1deg)
 
 # update the "time" coordinate in the future to pretend it's the "future"
 # shift by 2 degrees
-era_land_synth_new_2deg = era_land_climatology_years + 2
-era_land_synth_new_2deg = era_land_synth_new_2deg.assign_coords(
-    time=synth_time
-    # time=era_land_new.time
-)  # pretend its the new time period
-
-# combine back. this is comparable to era_land_all below
-era_land_synth_2deg = xr.concat([era_land_ref, era_land_synth_new_2deg], dim="time")
-era_land_synth_anom_2deg = (
-    era_land_synth_2deg.groupby("time.dayofyear") - ref_doy_climatology
-).drop_vars("dayofyear")
-era_land_synth_anom_2deg["t2m_x"].attrs = {
-    "units": "C"
-}  # hdp package needs units, and anom are same in K or C
-
-# calculate heatwave metrics
-measures_synth_2deg = hdp.measure.format_standard_measures(
-    temp_datasets=[era_land_synth_anom_2deg["t2m_x"]]
-).chunk({"time": -1, "lat": 10, "lon": 10})
-
-# if there isnt a gap between the 2 periods, then you can just pass measures_synth to compute_group_metrics
-# but if there's a gap, then need to split into old and new
-measures_synth_old_2deg = measures_synth_2deg.sel(
-    time=slice(str(ref_years[0] - 1), str(ref_years[1]))
+era_land_synth_new_2deg = era_land_ref_anom + 2
+metrics_synth_land_2deg = get_synthetic(
+    era_land_ref_anom,
+    era_land_synth_new_2deg,
+    start_year_new=new_years[0] - 1,
+    use_calendar_summer=True,
 )
-measures_synth_new_2deg = measures_synth_2deg.sel(
-    time=slice(str(new_years[0] - 1), str(new_years[1]))
-)
-
-if use_calendar_summer:
-    metrics_synth_old_2deg = hdp.metric.compute_group_metrics(
-        measures_synth_old_2deg,
-        thresholds_ref,
-        definitions,
-        use_doy=False,
-        start=(6, 1),
-        end=(9, 1),
-    )
-    metrics_synth_new_2deg = hdp.metric.compute_group_metrics(
-        measures_synth_new_2deg,
-        thresholds_ref,
-        definitions,
-        use_doy=False,
-        start=(6, 1),
-        end=(9, 1),
-    )
-    metrics_dataset_synth_2deg = xr.concat(
-        [metrics_synth_old_2deg, metrics_synth_new_2deg], dim="time"
-    )
-
-
-else:
-    metrics_synth_old_2deg = hdp.metric.compute_group_metrics(
-        measures_synth_old_2deg,
-        thresholds_ref,
-        definitions,
-        use_doy=True,
-        doy_mask=era_summer_mask,
-    )
-    metrics_synth_new_2deg = hdp.metric.compute_group_metrics(
-        measures_synth_new_2deg,
-        thresholds_ref,
-        definitions,
-        use_doy=True,
-        doy_mask=era_summer_mask,
-    )
-    metrics_dataset_synth_2deg = xr.concat(
-        [metrics_synth_old_2deg, metrics_synth_new_2deg], dim="time"
-    )
-
-
-# in these intensity metrics (AVI and AVA, zeros mean that there were no heatwaves that year)
-# so let's turn those 0s to nans
-metrics_dataset_synth_2deg["t2m_x.t2m_x_threshold.AVI"] = metrics_dataset_synth_2deg[
-    "t2m_x.t2m_x_threshold.AVI"
-].where(metrics_dataset_synth_2deg["t2m_x.t2m_x_threshold.AVI"] != 0)
-
-metrics_dataset_synth_2deg["t2m_x.t2m_x_threshold.AVA"] = metrics_dataset_synth_2deg[
-    "t2m_x.t2m_x_threshold.AVA"
-].where(metrics_dataset_synth_2deg["t2m_x.t2m_x_threshold.AVA"] != 0)
-
-# compute cumulative heat
-metrics_dataset_synth_2deg["t2m_x.t2m_x_threshold.sumHeat"] = (
-    metrics_dataset_synth_2deg["t2m_x.t2m_x_threshold.AVA"]
-    * metrics_dataset_synth_2deg["t2m_x.t2m_x_threshold.HWF"]
-)
-
-metrics_synth_land_2deg = add_landmask(metrics_dataset_synth_2deg)
 # metrics_synth_land_2deg.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_2deg_anom{suffix}.nc")
-
-
-# #############################
-# # deep dives
-# #############################
-
-
-# sudan_lon = 30
-# sudan_lat = 6
-
-# brazil_lon = -50
-# brazil_lat = -9
-
-# # era_land_all_anom = era_land_all_anom.assign_coords(lon=(((era_land_all_anom.lon + 180) % 360) - 180)).sortby("lon")
-
-# # np.argwhere(era_summer_mask.sel(lat = sudan_lat, method = 'nearest').values == 1) # see what the summer doys are
-# # era_land_all_anom_doy_masked = era_land_all_anom.groupby("time.dayofyear").where(
-# #     era_summer_mask == 1
-# # )
-# # era_land_all_anom_jja_masked = era_land_all_anom.where(era_land_all_anom['time.month'].isin([6,7,8]), drop = True)
-
-# # tmax_sudan_doy = era_land_all_anom_doy_masked.sel(lon=sudan_lon, lat=sudan_lat, method="nearest").groupby('time.year').mean(dim='time')
-# # fig_sudan_doy = tmax_sudan_doy.hvplot(title = 'sudan tmax anom, using doy 14-104')
-
-
-# # tmax_sudan_jja = era_land_all_anom_jja_masked.sel(lon=sudan_lon, lat=sudan_lat, method="nearest").groupby('time.year').mean(dim='time')
-# # fig_sudan_jja = tmax_sudan_jja.hvplot(title = 'sudan tmax anom, using jja')
-
-# # fig_sudan = (fig_sudan_doy + fig_sudan_jja).cols(1)
-# # # hvplot.save(fig_sudan, 'tmp.html')
-
-# # # brazil
-# # np.argwhere(era_summer_mask.sel(lat = brazil_lat, method = 'nearest').values == 1) # see what the summer doys are
-# # tmax_brazil_doy = era_land_all_anom_doy_masked.sel(lon=brazil_lon, lat=brazil_lat, method="nearest").groupby('time.year').mean(dim='time')
-# # fig_brazil_doy = tmax_brazil_doy.hvplot(title = 'brazil tmax anom, using doy 207-297 (starts in ~ mid july)')
-
-
-# # tmax_brazil_jja = era_land_all_anom_jja_masked.sel(lon=brazil_lon, lat=brazil_lat, method="nearest").groupby('time.year').mean(dim='time')
-# # fig_brazil_jja = tmax_brazil_jja.hvplot(title = 'brazil tmax anom, using djf')
-
-# # fig_brazil = (fig_brazil_doy + fig_brazil_jja).cols(1)
-# # # hvplot.save(fig_brazil, 'tmp.html')
-
-
-# # # lookinag at raw units (not anomalies)
-
-
-# era_land_all_doy_masked = era_land_all.groupby("time.dayofyear").where(
-#     era_summer_mask == 1
-# )
-# era_land_all_jja_masked = era_land_all.where(
-#     era_land_all["time.month"].isin([6, 7, 8]), drop=True
-# )
-
-# tmax_sudan_doy_raw = (
-#     era_land_all_doy_masked.sel(lon=sudan_lon, lat=sudan_lat, method="nearest")
-#     .groupby("time.year")
-#     .mean(dim="time")
-# )
-# tmax_sudan_jja_raw = (
-#     era_land_all_jja_masked.sel(lon=sudan_lon, lat=sudan_lat, method="nearest")
-#     .groupby("time.year")
-#     .mean(dim="time")
-# )
-
-# tmax_brazil_doy_raw = (
-#     era_land_all_doy_masked.sel(lon=brazil_lon, lat=brazil_lat, method="nearest")
-#     .groupby("time.year")
-#     .mean(dim="time")
-# )
-# tmax_brazil_jja_raw = (
-#     era_land_all_jja_masked.sel(lon=brazil_lon, lat=brazil_lat, method="nearest")
-#     .groupby("time.year")
-#     .mean(dim="time")
-# )
-
-# import hvplot.xarray
-
-# hvplot.extension("bokeh")
-
-# fig_brazil_doy_raw = tmax_brazil_doy_raw.hvplot(
-#     title="brazil tmax, using doy 207-297 (starts in ~ mid july)"
-# )
-# fig_brazil_jja_raw = tmax_brazil_jja_raw.hvplot(title="brazil tmax, using djf")
-
-# fig_brazil_raw = (fig_brazil_doy_raw + fig_brazil_jja_raw).cols(1)
-# # hvplot.save(fig_brazil_raw, 'tmp.html')
-
-
-# fig_sudan_doy_raw = tmax_sudan_doy_raw.hvplot(title="sudan tmax, using doy 14-104")
-# fig_sudan_jja_raw = tmax_sudan_jja_raw.hvplot(title="sudan tmax, using jja")
-# fig_sudan_raw = (fig_sudan_doy_raw + fig_sudan_jja_raw).cols(1)
-# # hvplot.save(fig_sudan_raw, 'tmp.html')
-
-
-# sudan_snippet = era_land_all.sel(lon=sudan_lon, lat=sudan_lat, method="nearest").sel(
-#     time=slice("1963", "1964")
-# )
-# fig_ela = sudan_snippet.hvplot()
-# fig_era = (
-#     era["t2m_x"]
-#     .sel(lon=sudan_lon, lat=sudan_lat, method="nearest")
-#     .sel(time=slice("1963", "1964"))
-#     .hvplot()
-# )
-
-# era_df = (
-#     era["t2m_x"]
-#     .sel(lon=sudan_lon, lat=sudan_lat, method="nearest")
-#     .sel(time=slice("1964", "1964"))
-#     .to_dataframe()
-# )
-
-# a = xr.open_dataset("D:data\\ERA5\\t2m_x_1x1_2025\\t2m_x_daily_1x1_1964.nc")
-# a = a.assign_coords(lon=(((a.lon + 180) % 360) - 180)).sortby("lon")
-# aa = (
-#     a["t2m"]
-#     .sel(lon=sudan_lon, lat=sudan_lat, method="nearest")
-#     .sel(time=slice("1963", "1964"))
-# )
-# fig_aa = aa.hvplot()
-
-# (fig_era + fig_ela + fig_aa).cols(1)

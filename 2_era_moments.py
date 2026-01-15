@@ -1,3 +1,8 @@
+"""
+analyzing the output of 0_era_meanshift.py
+- looking at heatwave metrics as a function of "climatological" variance and skews
+"""
+
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -140,12 +145,19 @@ hw_mean_diff = hw_new.mean(dim="time") - hw_old.mean(dim="time")
 
 #######################################################################
 # Calculate mean differences (new period) - (old period) for temperature
+
+# NOTE! This comes from ERA daily TMAX which has been processed by:
+#   - centered to have mean zero over the entire 1960-2025 period
+#   - removing day-of-year means, so that the Jan 12 time series is mean 0.
+#       - with the caveat that the day-of-year means are calculated using the "climatological dataset" (see next chunk)
+#  (this is the same data that was used to calculate the heatwave metrics.)
 #######################################################################
 
-# anomalies relative to ref_years, calculated in 0_era_medianshift.py
+# anomalies relative to ref_years, calculated in 0_era_meanshift.py
+# note: this dataset is standardized to have mean zero across the whole period, AND has doy climatology removed
+
 # TODO: should split up era_land_anom calculation into multiple files. is curently 10gb
-era_anom_path = "era_land_anom.nc"
-era_land_anom = xr.open_dataset(era_anom_path)
+era_land_anom = xr.open_dataset("era_land_anom.nc")
 
 # compute deltas-------------------------------------------
 era_land_old = era_land_anom.sel(time=slice(str(ref_years[0]), str(ref_years[1])))
@@ -155,15 +167,27 @@ tmax_mean_diff = (era_land_new.mean(dim="time") - era_land_old.mean(dim="time"))
 )
 
 ##############################################
-# Calculate climatological (ref_years) moments
-# NOTE! these are moments of the *doy anomalies* wrt to (ref_years), i.e. mean 0 over this period
+# Calculate climatological moments
+# NOTE! This comes from ERA daily TMAX which has been processed by:
+#   - centered to have mean zero over the entire 1960-2025 period
+#   - removing individual yearly means, so that each year is mean 0 (removing warming signal)
+#   - removing day-of-year means, so that the Jan 12 time series is mean 0.
 ##############################################
 
-clim_skew = stats.skew(era_land_old["t2m_x"], dims=["time"]).rename("t2m_x_skew")
-clim_kurt = stats.kurtosis(era_land_old["t2m_x"], dims=["time"]).rename("t2m_x_kurt")
-clim_var = era_land_old["t2m_x"].var(dim="time").rename("t2m_x_var")
+
+era_land_anom_for_climatology = xr.open_dataset("era_land_anom_for_climatology.nc")
+
+clim_skew = stats.skew(era_land_anom_for_climatology["t2m_x"], dims=["time"]).rename(
+    "t2m_x_skew"
+)
+clim_kurt = stats.kurtosis(
+    era_land_anom_for_climatology["t2m_x"], dims=["time"]
+).rename("t2m_x_kurt")
+clim_var = era_land_anom_for_climatology["t2m_x"].var(dim="time").rename("t2m_x_var")
 clim_ar1 = xr.corr(
-    era_land_old["t2m_x"], era_land_old["t2m_x"].shift(time=1), dim="time"
+    era_land_anom_for_climatology["t2m_x"],
+    era_land_anom_for_climatology["t2m_x"].shift(time=1),
+    dim="time",
 ).rename("t2m_x_ar1")
 
 climatology_stats = xr.merge([clim_skew, clim_kurt, clim_var, clim_ar1])
