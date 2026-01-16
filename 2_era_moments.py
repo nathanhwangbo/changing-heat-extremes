@@ -153,7 +153,7 @@ hw_mean_diff = hw_new.mean(dim="time") - hw_old.mean(dim="time")
 #  (this is the same data that was used to calculate the heatwave metrics.)
 #######################################################################
 
-# anomalies relative to ref_years, calculated in 0_era_meanshift.py
+# anomalies calculated in 0_era_meanshift.py
 # note: this dataset is standardized to have mean zero across the whole period, AND has doy climatology removed
 
 # TODO: should split up era_land_anom calculation into multiple files. is curently 10gb
@@ -173,7 +173,6 @@ tmax_mean_diff = (era_land_new.mean(dim="time") - era_land_old.mean(dim="time"))
 #   - removing individual yearly means, so that each year is mean 0 (removing warming signal)
 #   - removing day-of-year means, so that the Jan 12 time series is mean 0.
 ##############################################
-
 
 era_land_anom_for_climatology = xr.open_dataset("era_land_anom_for_climatology.nc")
 
@@ -469,7 +468,7 @@ fig_qbins_final = fig_qbins.map(
     )
 ).opts(hv.opts.HeatMap(frame_width=fwidth_qbins, frame_height=fheight_qbins))
 
-# hvplot.save(fig_qbins_final, "fig_qbins.png")
+# hvplot.save(fig_qbins_final, "figures\\fig_qbins.png")
 #########################################
 
 
@@ -659,7 +658,10 @@ hw_new_2deg = hw_synth_2deg.sel(time=slice(str(new_years[0]), str(new_years[1]))
 hw_mean_diff_2deg = hw_new_2deg.mean(dim="time") - hw_old_2deg.mean(dim="time")
 
 combined_synth_2deg_ds = xr.merge([climatology_stats, hw_mean_diff_2deg], join="exact")
-combined_synth_2deg_df = combined_synth_2deg_ds.to_dataframe().dropna(how="all")
+combined_synth_2deg_df = combined_synth_2deg_ds.to_dataframe().dropna(
+    how="all"
+)  # this just drops ocean gridcells
+
 
 fig_var_2deg_synth = get_scatter(
     combined_synth_2deg_df,
@@ -854,4 +856,4 @@ fig_2deg_final = fig_2deg_updated.map(
 ).opts(
     opts.Curve(frame_width=fwidth_qbins, frame_height=fheight_qbins),
 )
-# hvplot.save(fig_2deg_final, 'fig_2deg.png')
+# hvplot.save(fig_2deg_final, 'figures\\fig_2deg.png')

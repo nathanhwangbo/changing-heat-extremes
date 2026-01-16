@@ -380,14 +380,4 @@ fig1_final = fig1_updated.map(
 )
 
 
-# hvplot.save(fig1_final, f"fig_meanshift_{suffix}_ref{ref_years[0]}_{ref_years[1]}.png")
-
-
-# fig1 = fig1.opts(
-#     # hv.opts.Image(width=700, height=295),
-#     # hv.opts.Text(text_font_size='30pt') # Scale up text annotations
-#     # hv.opts.Text(fontscale =3),
-# )
-# fig1.opts(hv.opts.Image(data_aspect = 1.2))
-
-# fig1.opts(width = 1000, height = 600, fontscale = 3)
+# hvplot.save(fig1_final, f"figures\\fig_meanshift_{suffix}_ref{ref_years[0]}_{ref_years[1]}.png")

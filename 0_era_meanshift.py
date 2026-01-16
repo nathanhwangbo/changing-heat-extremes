@@ -172,8 +172,25 @@ def process_heatwave_metrics(da_metrics):
     returns: a version of da_metrics with added variables, but same coordinates
     """
 
+    ## NOTE! ordering matters! It's important that we calculate sumHeat before changing turning AVA 0 -> nan
+    ## sumHEAT which combines frequency with intensity, so it makes more sense for sumHeat to be 0
+
+    ## toy example for mental model:
+    ##     eg_hwf = [0,0,3,4,3,0] # say the first 3 values are the ref period, and the last 3 is the new period
+    ##     eg_ava = [0,0,10,20,5, 0] OR a_ava = [nan, nan, 10, 20, 5, nan]
+    ##     a_cumheat = [0,0,30,80,15,0] OR a_cumheat = [nan, nan, 30, 80, 15, nan]
+    ##     a_diff = 95/3 - 10 =~ 21.7, OR a_diff = 65/2 - 30 =~ 2.5
+
+    # compute cumulative heat
+    da_metrics["t2m_x.t2m_x_threshold.sumHeat"] = (
+        da_metrics["t2m_x.t2m_x_threshold.AVA"]
+        * da_metrics["t2m_x.t2m_x_threshold.HWF"]
+    )
+
     # in these intensity metrics (AVI and AVA, zeros mean that there were no heatwaves that year)
     # so let's turn those 0s to nans
+    # this would be useful, if we wanted AVI to measure "average intensity of a day | day was a heatwave day"
+    # This reduces the dependence of AVI on heatwave frequency.
     da_metrics["t2m_x.t2m_x_threshold.AVI"] = da_metrics[
         "t2m_x.t2m_x_threshold.AVI"
     ].where(da_metrics["t2m_x.t2m_x_threshold.AVI"] != 0)
@@ -181,12 +198,6 @@ def process_heatwave_metrics(da_metrics):
     da_metrics["t2m_x.t2m_x_threshold.AVA"] = da_metrics[
         "t2m_x.t2m_x_threshold.AVA"
     ].where(da_metrics["t2m_x.t2m_x_threshold.AVA"] != 0)
-
-    # compute cumulative heat
-    da_metrics["t2m_x.t2m_x_threshold.sumHeat"] = (
-        da_metrics["t2m_x.t2m_x_threshold.AVA"]
-        * da_metrics["t2m_x.t2m_x_threshold.HWF"]
-    )
 
     metrics_synth_land = add_landmask(da_metrics)
     return metrics_synth_land
@@ -318,13 +329,13 @@ era_land_climatology_years = era_land.sel(
 # make the whole time series zero mean, across 1960-2025. apply separately to each gridcell
 era_land_climatology_years_zeromean = (
     era_land_climatology_years - era_land_climatology_years.mean(dim="time")
-).reset_coords("year", drop=True)
+)
 
 # capture "global warming" at each grid cell by getting the mean at each year
 era_land_yearly_mean = era_land_climatology_years_zeromean.groupby("time.year").mean()
 era_land_no_yearly_mean = (
     era_land_climatology_years_zeromean.groupby("time.year") - era_land_yearly_mean
-)
+).reset_coords("year", drop=True)
 
 #### Note! we're taking anomalies with respect to the entire time period
 # ref_doy_climatology = era_land_ref.groupby("time.dayofyear").mean()
@@ -346,9 +357,12 @@ era_land_ref_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
 # NOTE!
 # this dataset (1960-2025 mean removed -> individual yearly means removed -> doy mean removed)
 #   is the dataset that should be used to estimate "climatological" characteristics
-
 # era_land_ref_anom.to_netcdf("era_land_anom_for_climatology.nc")
 
+
+#################################################################
+#### calculate doy thresholds, and smooth the threshold ---------
+##################################################################
 
 # conversion to celcius
 measures_ref = hdp.measure.format_standard_measures(
@@ -356,8 +370,6 @@ measures_ref = hdp.measure.format_standard_measures(
 )
 percentiles = [0.9]
 
-
-#### calculate doy thresholds, and smooth ----------------------
 thresholds_ref_unsmooth = hdp.threshold.compute_thresholds(
     measures_ref, percentiles, rolling_window_size=7
 ).compute()
@@ -383,11 +395,6 @@ thresholds_ref = thresholds_ref.chunk({"lat": 10, "lon": 10})
 
 # thresholds_ref.to_netcdf("thresholds_ref.nc")
 
-definitions = [[3, 0, 0]]  # heatwave is 3 consec days
-
-
-# --------------------------------------------------
-
 
 ################################################
 # calculate extremal metrics at each gridcell
@@ -399,6 +406,7 @@ definitions = [[3, 0, 0]]  # heatwave is 3 consec days
 # where the doy climatology was calculated from the third step in:
 #  daily time series -> shifted by a scalar to have zero mean across 1960-2025 -> shifted by a year-specific value to have zero mean each year -> remove doy climatology -> calculate q90 threshold
 
+definitions = [[3, 0, 0]]  # heatwave is 3 consec days
 
 ############################
 # observations (not synthetic)
@@ -410,7 +418,7 @@ era_land_all_anom = (
     era_land_climatology_years_zeromean.groupby("time.dayofyear") - ref_doy_climatology
 ).drop_vars("dayofyear")
 
-# save this for future
+# NOTE: save this for future -- this is is the data that's used to calculate heatwave metrics
 # era_land_all_anom.to_netcdf("era_land_anom.nc")
 
 era_land_all_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
@@ -420,6 +428,7 @@ era_land_all_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
 measures_all = hdp.measure.format_standard_measures(
     temp_datasets=[era_land_all_anom["t2m_x"]]
 ).chunk({"time": -1, "lat": 10, "lon": 10})
+
 
 if use_calendar_summer:
     metrics_dataset_all = hdp.metric.compute_group_metrics(
@@ -435,7 +444,9 @@ else:
     )
 
 metrics_all_land = process_heatwave_metrics(metrics_dataset_all)
-# metrics_all_land.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_anom{suffix}.nc")
+# metrics_all_land.to_netcdf(
+#     f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_anom{suffix}.nc"
+# )
 
 
 ###########
@@ -470,7 +481,9 @@ metrics_synth_land = get_synthetic(
     use_calendar_summer=True,
 )
 
-# metrics_synth_land.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_anom{suffix}.nc")
+# metrics_synth_land.to_netcdf(
+#     f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_anom{suffix}.nc"
+# )
 
 
 ###########
@@ -488,7 +501,9 @@ metrics_synth_land_1deg = get_synthetic(
     start_year_new=new_years[0] - 1,
     use_calendar_summer=True,
 )
-# metrics_synth_land_1deg.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_1deg_anom{suffix}.nc")
+# metrics_synth_land_1deg.to_netcdf(
+#     f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_1deg_anom{suffix}.nc"
+# )
 
 
 ###########
@@ -504,4 +519,6 @@ metrics_synth_land_2deg = get_synthetic(
     start_year_new=new_years[0] - 1,
     use_calendar_summer=True,
 )
-# metrics_synth_land_2deg.to_netcdf(f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_2deg_anom{suffix}.nc")
+# metrics_synth_land_2deg.to_netcdf(
+#     f"era_hw_metrics_{ref_years[0]}_{new_years[1]}_synth_2deg_anom{suffix}.nc"
+# )
