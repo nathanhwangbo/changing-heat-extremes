@@ -30,6 +30,17 @@ gdal = ">=3.12.1,<4"
 libgdal-core = ">=3.12.1,<4"
 pyproj = ">=3.7.2,<4"
 regionmask = ">=0.13.0,<0.14"
+hvplot = ">=0.12.2,<0.13"
+tastymap = ">=0.4.1,<0.5"
+jupyter_bokeh = ">=4.0.5,<5"
+geoviews = ">=1.15.1,<2"
+selenium = ">=4.40.0,<5"
+firefox = ">=147.0.2,<148"
+geckodriver = ">=0.36.0,<0.37"
+selenium-manager = ">=4.40.0,<5"
+xarray-einstats = ">=0.9.1,<0.10"
+statsmodels = ">=0.14.6,<0.15"
+colorcet = ">=3.1.0,<4"
 
 
 

@@ -2,7 +2,10 @@ import numpy as np
 import xarray as xr
 import regionmask
 import hdp
+import dask
 
+xr.set_options(use_new_combine_kwarg_defaults=True)
+dask.config.set(scheduler="single-threaded")
 
 ###############################################
 ## helper functions used in 0_era_meanshift.py
@@ -145,9 +148,7 @@ def process_heatwave_metrics(da_metrics):
     return metrics_synth_land
 
 
-def get_synthetic_hw_metrics(
-    da_ref, da_synth_new, new_years, thresholds_ref, definitions, use_calendar_summer=True
-):
+def get_synthetic_hw_metrics(da_ref, da_synth_new, new_years, thresholds_ref, definitions, use_calendar_summer=True):
     """
     generate heatwave metrics given a early period xr object (da_ref) and a synthetic latter period (da_synth_new)
 
@@ -166,23 +167,18 @@ def get_synthetic_hw_metrics(
     """
     ref_years = [da_ref.time.values.min().year, da_ref.time.values.max().year]
     synth_time = xr.date_range(
-        start=str(new_years[0]),
+        start=str(new_years[0] - 1),
         periods=da_ref.time.size,
         freq="D",
         calendar="noleap",
         use_cftime=True,
     )
-    era_land_synth_new = da_synth_new.assign_coords(
-        time=synth_time
-        # time=era_land_new.time
-    )  # pretend its the new time period
+    era_land_synth_new = da_synth_new.assign_coords(time=synth_time)  # pretend its the new time period
 
     # combine back. this is comparable to era_land_all_anom above, except with a small gap in the middle (1990-95)
     era_land_synth_anom = xr.concat([da_ref, era_land_synth_new], dim="time")
 
-    era_land_synth_anom["t2m_x"].attrs = {
-        "units": "C"
-    }  # hdp package needs units, and anom are same in K or C
+    era_land_synth_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units, and anom are same in K or C
 
     # calculate heatwave metrics
     measures_synth = hdp.measure.format_standard_measures(temp_datasets=[era_land_synth_anom["t2m_x"]]).chunk(
@@ -236,3 +232,16 @@ def get_synthetic_hw_metrics(
     metrics_synth_land = process_heatwave_metrics(metrics_dataset_synth)
 
     return metrics_synth_land
+
+
+def write_nc(ds, filepath):
+    # a default choice of compression
+    comp = dict(zlib=True, complevel=5)
+
+    if type(ds) is xr.Dataset:
+        for var in ds:
+            ds[var].encoding.update(comp)
+    if type(ds) is xr.DataArray:
+        ds.encoding.update(comp)
+
+    ds.to_netcdf(filepath, format="NETCDF4")
