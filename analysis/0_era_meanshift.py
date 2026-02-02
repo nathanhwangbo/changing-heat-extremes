@@ -5,18 +5,8 @@ inputs:
     - (optional) a doy-mask specifying the "summer" season, if using the heat-based definition of summer instead of JJA.
 
 outputs (for use in subsequent scripts in /analysis/):
-    - estimates of climatological variance and skewness           (uses all years)
     - a map with the q90(tmax) threshold used to define heatwaves (uses reference period 1960-1990)
     - heatwave metrics per year                                   (uses all years)
-
-
-Notable choices:
-
-- To estimate climatological variance and skew, we wanted to use as much data as possible. To this end, the following operations were performed:
-    - 1. remove year $y$'s mean from each day in year $y$ for $y$ in 1960:2025
-    - 2. estimate the day-of-year climatology by taking the mean across 1960:2025 and smoothing via 5 fourier basis functions
-    - 3. remove this day-of-year climatology, and calculate skewness and variance
-    - 4. This gets used in 2_era_moments.py
 
 - To estimate heatwave metrics, we:
     - 1. estimate the day-of-year climatology by taking the mean across 1960:1990 and smoothing via 5 fourier basis functions
@@ -65,50 +55,15 @@ era = (
 
 # fixing formatting for the hdp package
 era["t2m_x"].attrs = {"units": "K"}  # hdp package needs units
-# era = era.convert_calendar(calendar="standard", use_cftime=True)  # .compute()
 era = era.convert_calendar(calendar="noleap", use_cftime=True)
 era = era.sel(lat=slice(-60, 80)).chunk({"time": -1, "lat": 10, "lon": 10})  # matching karen's doy mask
 
-# convert to (-180, 180) lon. specific to our use case
+# convert to (-180, 180) lon.
 era = era.assign_coords(lon=(((era.lon + 180) % 360) - 180)).sortby("lon")
 
 
 # add landmask
 era_land = ahelpers.add_landmask(era).compute()
-
-
-##############################################
-# Calculate climatological variance and skewness,
-#    (used in 2_era_moments.py)
-#############################################
-
-# defining the location-specific heat threshold ---------------
-# using time period 1960-2025
-
-# # note! if using jja in nh and djf in southern hemisphere, then we should also include the year before in the ref period
-# # bc djf 1950 requires december of 1949.
-era_land_climatology_years = era_land.sel(time=slice(str(flags.ref_years[0] - 1), str(flags.new_years[1])))
-
-# capture "global warming" at each grid cell by getting the mean at each year
-era_land_yearly_mean = era_land_climatology_years.groupby("time.year").mean()
-era_land_no_yearly_mean = (era_land_climatology_years.groupby("time.year") - era_land_yearly_mean).reset_coords(
-    "year", drop=True
-)
-
-doy_climatology = ahelpers.fourier_climatology_smoother(era_land_no_yearly_mean["t2m_x"], n_time=365, n_bases=5)
-
-# take doy anomalies
-era_land_climatology_anom = (era_land_no_yearly_mean.groupby("time.dayofyear") - doy_climatology).drop_vars("dayofyear")
-era_land_climatology_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
-
-
-# NOTE!
-# this dataset (1960-2025 mean removed -> individual yearly means removed -> doy mean removed)
-#   is the dataset that should be used to estimate "climatological" variance and skew
-ahelpers.write_nc(
-    era_land_climatology_anom,
-    f"processed_data/land_anom_for_climatology_{flags.ref_years[0]}_{flags.new_years[1]}.nc",
-)
 
 
 #################################################################
@@ -137,22 +92,6 @@ thresholds_ref_smoothed = ahelpers.fourier_climatology_smoother(
     n_bases=5,
 )
 
-
-# ### example of what the function would look like for multiple percentiles
-# # not using apply_ufunc because I don't like how it drops coordinates
-# thresholds_ref_smoothed = xr.concat(
-#     [
-#         ahelpers.fourier_climatology_smoother(
-#             thresholds_ref_unsmooth["t2m_x_threshold"].sel(percentile=p, drop=True),
-#             n_time=365,
-#             n_bases=5,
-#         )
-#         for p in percentiles
-#     ],
-#     dim="percentile",
-# )
-
-
 # match the formatting of the original hdp function ---
 thresholds_ref = (
     thresholds_ref_smoothed.to_dataset()
@@ -172,11 +111,6 @@ ahelpers.write_nc(
 ################################################
 # calculate extremal metrics at each gridcell
 ###############################################
-
-# heatwave is 3 consec days
-# # the other 2 definitions are for sensitivity tests
-definitions = [[3, 0, 0], [2, 0, 0], [6, 0, 0]]
-
 
 ############################
 # observations (not synthetic)
@@ -200,13 +134,13 @@ measures_all = hdp.measure.format_standard_measures(temp_datasets=[era_land_all_
 
 if flags.use_calendar_summer:
     metrics_dataset_all = hdp.metric.compute_group_metrics(
-        measures_all, thresholds_ref, definitions, start=(6, 1), end=(9, 1)
+        measures_all, thresholds_ref, flags.hw_def, start=(6, 1), end=(9, 1)
     )
 else:
     metrics_dataset_all = hdp.metric.compute_group_metrics(
         measures_all,
         thresholds_ref,
-        definitions,
+        flags.hw_def,
         use_doy=True,
         doy_mask=era_summer_mask,
     )
@@ -243,7 +177,7 @@ metrics_synth_land = ahelpers.get_synthetic_hw_metrics(
     era_land_synth_new,
     flags.new_years,
     thresholds_ref,
-    definitions,
+    flags.hw_def,
     use_calendar_summer=flags.use_calendar_summer,
 )
 ahelpers.write_nc(
@@ -266,7 +200,7 @@ metrics_synth_land_1deg = ahelpers.get_synthetic_hw_metrics(
     era_land_synth_new_1deg,
     flags.new_years,
     thresholds_ref,
-    definitions,
+    flags.hw_def,
     use_calendar_summer=flags.use_calendar_summer,
 )
 
@@ -288,7 +222,7 @@ metrics_synth_land_2deg = ahelpers.get_synthetic_hw_metrics(
     era_land_synth_new_2deg,
     flags.new_years,
     thresholds_ref,
-    definitions,
+    flags.hw_def,
     use_calendar_summer=flags.use_calendar_summer,
 )
 

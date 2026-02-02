@@ -19,17 +19,17 @@ data_dir = Path("processed_data")
 
 hw_all = (
     xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc")
-    .sel(percentile=flags.percentile_threshold, definition=flags.hw_def)
+    .sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
     .drop_vars(["percentile", "definition"])
 )
 hw_synth_1deg = (
     xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_1deg_anom{flags.label}.nc")
-    .sel(percentile=flags.percentile_threshold, definition=flags.hw_def)
+    .sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
     .drop_vars(["percentile", "definition"])
 )
 hw_synth_2deg = (
     xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_2deg_anom{flags.label}.nc")
-    .sel(percentile=flags.percentile_threshold, definition=flags.hw_def)
+    .sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
     .drop_vars(["percentile", "definition"])
 )
 

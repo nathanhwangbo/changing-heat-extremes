@@ -33,6 +33,7 @@ note: if you try an option and it doesn't work, look at modifying 0_era_meanshif
 
 note: if you only care about `percentile_threshold` and the `hw_def` args, it might be faster for you to use the built-in vectorization in the HDP package
     - i.e. you don't need to pass in one config at a time to the hdp functions.
+    - (this is why the hw_def has an extra set of brackets)
 
 """
 
@@ -41,7 +42,7 @@ use_calendar_summer = True  # if true, use JJA as summer. else use dayofyear mas
 ref_years = [1960, 1990]  # the time period the thresholds are calculated over
 new_years = [1995, 2025]  # the time period we're gonna compare to
 percentile_threshold = 0.9
-hw_def = "3-0-0"
+hw_def = [[3, 0, 0]]
 
 
 ##################################################
@@ -51,34 +52,32 @@ hw_def = "3-0-0"
 
 ## sensitivity to summer definition --------------------
 # label = "doy_q90_300"
-# use_calendar_summer = False  # if true, use JJA as summer. else use dayofyear mask
-# ref_years = [1960, 1990]  # the time period the thresholds are calculated over
-# new_years = [1995, 2025]  # the time period we're gonna compare to
+# use_calendar_summer = False  # CHANGED
+# ref_years = [1960, 1990]
+# new_years = [1995 + 1, 2025]  # CHANGED: + 1 accounts for calendar year wrapping in my modified hdp functions
 # percentile_threshold = 0.9
-# hw_def = "3-0-0"
-
+# hw_def = [[3,0,0]]
 
 ## sensitivity to "extreme heat" definition (i.e. quantile) --------------------------------
-# label = "doy_q95_300"
-# use_calendar_summer = True  # if true, use JJA as summer. else use dayofyear mask
-# ref_years = [1960, 1990]  # the time period the thresholds are calculated over
-# new_years = [1995, 2025]  # the time period we're gonna compare to
-# percentile_threshold = 0.95
-# hw_def = "3-0-0"
+# label = "q95_300"
+# use_calendar_summer = True
+# ref_years = [1960, 1990]
+# new_years = [1995, 2025]
+# percentile_threshold = 0.95  # CHANGED
+# hw_def = [[3,0,0]]
 
 ## sensitivity to heatwave definition --------------------------------
-# label = "doy_q95_200"
-# use_calendar_summer = True  # if true, use JJA as summer. else use dayofyear mask
-# ref_years = [1960, 1990]  # the time period the thresholds are calculated over
-# new_years = [1995, 2025]  # the time period we're gonna compare to
+# label = "q90_200"
+# use_calendar_summer = True
+# ref_years = [1960, 1990]
+# new_years = [1995, 2025]
 # percentile_threshold = 0.90
-# hw_def = "2-0-0"
-
+# hw_def = [[2,0,0]]  # CHANGED
 
 ## sensitivity to heatwave definition --------------------------------
-# label = "doy_q95_500"
-# use_calendar_summer = True  # if true, use JJA as summer. else use dayofyear mask
-# ref_years = [1960, 1990]  # the time period the thresholds are calculated over
-# new_years = [1995, 2025]  # the time period we're gonna compare to
+# label = "q90_500"
+# use_calendar_summer = True
+# ref_years = [1960, 1990]
+# new_years = [1995, 2025]
 # percentile_threshold = 0.90
-# hw_def = "5-0-0"
+# hw_def = [[5, 0, 0]]  # CHANGED

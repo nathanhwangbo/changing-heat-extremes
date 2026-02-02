@@ -1,9 +1,8 @@
 # analyzing the output of 0_era_meanshift.py
 
 from changing_heat_extremes import flags
-
-# from changing_heat_extremes import analysis_helpers as ahelpers
 from changing_heat_extremes import plot_helpers as phelpers
+# from changing_heat_extremes import analysis_helpers as ahelpers
 
 import numpy as np
 import xarray as xr
@@ -28,11 +27,11 @@ fwidth = 400
 fheight = 150
 
 hw_obs = xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc").sel(
-    percentile=flags.percentile_threshold, definition=flags.hw_def
+    percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0]))
 )
 hw_synth = xr.open_dataset(
     data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_anom{flags.label}.nc"
-).sel(percentile=flags.percentile_threshold, definition=flags.hw_def)
+).sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
 
 
 ##########################################################
@@ -273,9 +272,9 @@ fig_obs_minus_synth = hv.Layout(
 
 
 # manually update the labels on this one
-fig_obs_minus_synth[0].opts(title=f"obs - synth ({flags.label})")
-fig_obs_minus_synth[1].opts(title=f"obs - synth ({flags.label})")
-fig_obs_minus_synth[2].opts(title=f"obs - synth ({flags.label})")
+fig_obs_minus_synth[0].opts(title="obs - synth")
+fig_obs_minus_synth[1].opts(title="obs - synth")
+fig_obs_minus_synth[2].opts(title="obs - synth")
 # fig_obs_minus_synth[3].opts(title=f"obs - synth ({flags.label})")
 
 

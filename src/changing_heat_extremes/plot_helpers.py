@@ -6,7 +6,13 @@ import statsmodels.api as sm
 from functools import partial
 import string
 from bokeh.models import FixedTicker
+from bokeh.themes import Theme
 
+
+########################
+# plot global variables
+# eg themes, colormaps
+########################
 rdbu_discrete = tastymap.cook_tmap("RdYlBu_r", num_colors=12).cmap
 
 # rdbu_hex = [mcolors.rgb2hex(rdbu_discrete(i)) for i in range(rdbu_discrete.N)]
@@ -19,6 +25,26 @@ reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors=12)[1:11].cmap  # g
 # reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors = 12)
 # reds_discrete_no_white = tastymap.utils.subset_cmap(slice(1, 11)))
 blues_discrete = tastymap.cook_tmap("blues", num_colors=10).cmap
+
+
+# Forces a specific font ('sans-serif') -----------
+new_font = "sans-serif"
+#  [n for n in bokeh.models.Text.properties() if "font" in n] # see what's out there
+custom_theme = Theme(
+    json={
+        "attrs": {
+            "Title": {"text_font": new_font},
+            "Axis": {"axis_label_text_font": new_font, "major_label_text_font": new_font},
+            "Legend": {"title_text_font": new_font, "label_text_font": new_font},
+            "LegendItem": {"text_font": new_font, "label_text_font": new_font},
+            "Label": {"text_font": new_font},
+            "Text": {"text_font": {"value": new_font}},
+        }
+    }
+)
+
+# ppply this theme to all bokeh plots
+hv.renderer("bokeh").theme = custom_theme
 
 
 def subplot_label_hook(plot, element, sub_label=""):
