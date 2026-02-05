@@ -16,15 +16,15 @@ from pathlib import Path
 fig_dir = Path("figures")
 data_dir = Path("processed_data")
 
-# first figure had 6 panels
-# this figure has 9
-scale = 9 / 6
-title_size = 16 * scale
-label_size = 14 * scale
-tick_size = 10 * scale
+# # first figure had 6 panels
+# # this figure has 9
+# scale = 9 / 6
+# title_size = 16 * scale
+# label_size = 14 * scale
+# tick_size = 10 * scale
 
-fwidth = 400
-fheight = 150
+# fwidth = 400
+# fheight = 150
 
 hw_obs = xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc").sel(
     percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0]))
@@ -97,7 +97,7 @@ def get_delta_fig(
     #     cmap=rdbu_discrete,
     #     clim=(-1, 1),
     #     title=f"delta in average intensity ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
-    #     clabel="degC anomaly",
+    #     clabel="°C anomaly",
     #     xlabel="",
     #     ylabel="",
     # ).opts(fontscale=2.5, ylim=(-60, None))
@@ -111,7 +111,7 @@ def get_delta_fig(
         clim=clim_heatsum,
         # title=f"delta in cumulative heat ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
         title="Change in Cumulative Heat",
-        clabel="degC-days",
+        clabel="°C-days",
         xlabel="",
         ylabel="",
     ).opts(ylim=(-59, None))
@@ -125,7 +125,7 @@ def get_delta_fig(
     #     clim=clim_max,
     #     # title=f"delta in seasonal max ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
     #     title="Change in seasonal max",
-    #     clabel="degC anomaly",
+    #     clabel="°C anomaly",
     #     xlabel="",
     #     ylabel="",
     # ).opts(fontscale=2.5, ylim=(-60, None))
@@ -166,9 +166,9 @@ fig_delta_obs = hv.Layout(
             fig_delta_obs[i]
             * hv.Text(
                 -180 + 220,
-                -60 + 10,
+                -60 + 11,
                 f"Global Mean={str(mean_diff_obs[f't2m_x.t2m_x_threshold.{var_list[i]}'].mean().values.round(2))}",
-                fontsize=label_size - 2,
+                fontsize=phelpers.label_size - 2,
             )
         ).opts(ylim=(-59, None))
         for i in range(len(var_list))
@@ -219,15 +219,15 @@ fig_delta_synth = hv.Layout(
             fig_delta_synth_init[i]
             * hv.Text(
                 -180 + 35,
-                -60 + 10,
+                -60 + 11,
                 f"r={str(cor_obs_synth[f't2m_x.t2m_x_threshold.{var_list[i]}'].values.round(2))}",
-                fontsize=label_size - 2,
+                fontsize=phelpers.label_size - 2,
             )
             * hv.Text(
                 -180 + 220,
-                -60 + 10,
+                -60 + 11,
                 f"Global Mean={str(mean_diff_synth[f't2m_x.t2m_x_threshold.{var_list[i]}'].mean().values.round(2))}",
-                fontsize=label_size - 2,
+                fontsize=phelpers.label_size - 2,
             )
         ).opts(ylim=(-59, None))
         for i in range(len(var_list))
@@ -261,9 +261,9 @@ fig_obs_minus_synth = hv.Layout(
             fig_obs_minus_synth_init[i]
             * hv.Text(
                 -180 + 52,
-                -60 + 10,
+                -60 + 11,
                 f"MAE={str(mean_abs_diff[f't2m_x.t2m_x_threshold.{var_list[i]}'].values.round(2))}",
-                fontsize=label_size - 2,
+                fontsize=phelpers.label_size - 2,
             )
         ).opts(ylim=(-59, None), xlim=(-180, 180))
         for i in range(len(var_list))
@@ -289,7 +289,7 @@ for i in np.arange(1, len(fig_delta_obs)).tolist():
 # weird ordering bc I want to go vertical instead of horizontal
 letter_ordering = ["a", "d", "g", "b", "e", "h", "c", "f", "i"]
 fig1_updated = phelpers.add_subplot_labels(fig1, labels=letter_ordering)
-fig1_updated.cols(3).opts(shared_axes=False)
+fig1_updated.cols(3).opts(shared_axes=False, toolbar=None)
 
 ####################
 # Final figure! ----
@@ -307,16 +307,7 @@ fig1_updated.map(
 ).map(lambda x: x.opts(xlabel=""), hv.Text)
 
 fig1_final = fig1_updated.map(
-    lambda x: x.options(
-        fontsize={
-            "title": title_size,
-            "labels": label_size,
-            "ticks": tick_size,
-            "legend": tick_size,
-        },
-        frame_width=fwidth,
-        frame_height=fheight,
-    ),
+    lambda x: x.options(frame_height=phelpers.fheight_wide, **phelpers.global_kwargs),
     [hv.Image, hv.Text],
 )
 

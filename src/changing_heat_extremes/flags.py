@@ -37,6 +37,11 @@ note: if you only care about `percentile_threshold` and the `hw_def` args, it mi
 
 """
 
+
+###################
+# analysis flags
+####################
+
 label = "q90_300"
 use_calendar_summer = True  # if true, use JJA as summer. else use dayofyear mask
 ref_years = [1960, 1990]  # the time period the thresholds are calculated over

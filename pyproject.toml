@@ -41,6 +41,9 @@ selenium-manager = ">=4.40.0,<5"
 xarray-einstats = ">=0.9.1,<0.10"
 statsmodels = ">=0.14.6,<0.15"
 colorcet = ">=3.1.0,<4"
+cdsapi = ">=0.7.7,<0.8"
+xesmf = ">=0.9.2,<0.10"
+cartopy = ">=0.25.0,<0.26"
 
 
 

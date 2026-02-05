@@ -7,12 +7,18 @@ from functools import partial
 import string
 from bokeh.models import FixedTicker
 from bokeh.themes import Theme
+from pathlib import Path
 
+
+# hv.extension("bokeh", enable_mathjax=True)
 
 ########################
 # plot global variables
 # eg themes, colormaps
 ########################
+
+fig_dir = Path("figures")
+
 rdbu_discrete = tastymap.cook_tmap("RdYlBu_r", num_colors=12).cmap
 
 # rdbu_hex = [mcolors.rgb2hex(rdbu_discrete(i)) for i in range(rdbu_discrete.N)]
@@ -20,7 +26,14 @@ rdbu_discrete = tastymap.cook_tmap("RdYlBu_r", num_colors=12).cmap
 # rdbu_discrete = tastymap.cook_tmap("RdYlBu_r", num_colors=12)
 # rdbu_hex = rdbu_discrete.to_model("hex")
 
-reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors=12)[1:11].cmap  # get rid of white
+
+# get rid of white
+reds_cmap = tastymap.cook_tmap("cet_CET_L18")[20:].cmap  # there are 256 values
+
+# alt:
+reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors=12)[
+    1:11
+].cmap  # get rid of white
 # equiv:
 # reds_discrete = tastymap.cook_tmap("cet_CET_L18", num_colors = 12)
 # reds_discrete_no_white = tastymap.utils.subset_cmap(slice(1, 11)))
@@ -34,9 +47,15 @@ custom_theme = Theme(
     json={
         "attrs": {
             "Title": {"text_font": new_font},
-            "Axis": {"axis_label_text_font": new_font, "major_label_text_font": new_font},
+            "Axis": {
+                "axis_label_text_font": new_font,
+                "major_label_text_font": new_font,
+            },
             "Legend": {"title_text_font": new_font, "label_text_font": new_font},
-            "LegendItem": {"text_font": new_font, "label_text_font": new_font},
+            "ColorBar": {
+                "title_text_font": new_font,
+                "major_label_text_font": new_font,
+            },
             "Label": {"text_font": new_font},
             "Text": {"text_font": {"value": new_font}},
         }
@@ -46,7 +65,39 @@ custom_theme = Theme(
 # ppply this theme to all bokeh plots
 hv.renderer("bokeh").theme = custom_theme
 
+## shared figure sizes and font sizes ---------
+# scale = 1  # in this case,
+# title_size = 16 * scale
+# label_size = 14 * scale
+# tick_size = 10 * scale
 
+# using the maps as reference
+title_size = 24
+label_size = 21
+tick_size = 15
+fwidth = 400  # frame height for an individual panel
+
+# change aspect ratio using height only
+fheight_wide = 150
+fheight_default = 300
+
+# this should be applied to individual panels.
+global_kwargs = dict(
+    toolbar=None,
+    fontscale=1,
+    fontsize={
+        "title": title_size,
+        "labels": label_size,
+        "ticks": tick_size,
+        "legend": tick_size,
+    },
+    frame_width=fwidth,
+)
+
+
+##############################
+# helper functions
+##############################
 def subplot_label_hook(plot, element, sub_label=""):
     """
     add subplot label to a single bokeh figure
@@ -81,13 +132,17 @@ def add_subplot_labels(plot, labels=string.ascii_lowercase):
     updated_figlist = []
     for i, subplot in enumerate(plot):
         new_label = f"({labels[i]})"  # this sets the format to (a), (b), ..
-        updated_subplot = subplot.opts(hooks=[partial(subplot_label_hook, sub_label=new_label)])
+        updated_subplot = subplot.opts(
+            hooks=[partial(subplot_label_hook, sub_label=new_label)]
+        )
         updated_figlist.append(updated_subplot)
 
-    return hv.Layout(updated_figlist)
+    return updated_figlist
 
 
-def cbar_discrete(start, end, cmap="RdBu", width=None, zero_centered=False, extension="bokeh"):
+def cbar_discrete(
+    start, end, cmap="RdBu", width=None, zero_centered=False, extension="bokeh"
+):
     """
     a hvplot helper to make a zero-centered segmented colorbar
     :param: start and end are the two endpoints of the colorbar. 0 should be contained inside
@@ -135,7 +190,9 @@ def cbar_discrete(start, end, cmap="RdBu", width=None, zero_centered=False, exte
             # which guarantees that all integers get their own ticks
             # this scales by order of magnitude, in case the range is small.
             # (e.g. if width is 0.03, then should try 0.01, 0.0125, ect..)
-            width_candidates = np.array([1, 1.25, 2, 2.5, 5]) * orderOfMag(width_ballpark)
+            width_candidates = np.array([1, 1.25, 2, 2.5, 5]) * orderOfMag(
+                width_ballpark
+            )
 
         else:
             # if the width between colors spans more than 1, then try the divisors
@@ -198,9 +255,94 @@ def cbar_discrete(start, end, cmap="RdBu", width=None, zero_centered=False, exte
     return cbar_dict
 
 
-def get_heatmap(combined_df, ref_years, new_years, y_name_var, y_name_label, x_name_base="tmax_diff", use_qbins=True):
+def cbar_zero_centered(start, end, num_bins="auto", cmap="RdBu", rescale=False):
     """
-    everything except for combined_df is just used for labelling purposes.
+    generate a discrete matplotlib colorbar with white at the zero mark, even if colorbar isn't symmetric around zero.
+    This function relies on matplotlib's method of automatically choosing tickmark locations, which means it doesn't always respect "(start, end)".
+        If you want a version of this that implements some gross custom logic I made for automatically choosing levels, let me know and I'll send it over
+
+    Args:
+        start (numeric): the bottom endpoint of the colobar, must be less than zero
+        end (numeric): the top endpoint of the colorbar, must be greater than zero
+        num_bins (int, optional): number of colors in the colorbar. See matplotlib.ticker.MaxNLocator. Defaults to "auto".
+        cmap (str, optional): what colormap to use. see list(plt.colormaps) for options. Diverging colorbars make the most sense here. Defaults to "RdBu".
+                              bonus! if you import colorcet, you can pass in any of their colormap names to this argument!
+        rescale (bool, optional): whether to rescale the colormap so that the endpoints are equally intense, regardess of their values. Defaults to False.
+
+    Returns:
+        dict: dictionary of kwargs that can be passed into xarary's plot accessor. (will also work for most matplotlib functions)
+
+    Example:
+        my_kwargs = cbar_zero_centered(-30, 20)
+        da = xr.tutorial.open_dataset('air_temperature').isel(time=1).air - 273.15
+        da.plot(**my_kwargs)
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    import matplotlib.ticker
+    import numpy as np
+
+    # 256 colors, interpolating between 0 and 1
+    og_cmap = plt.colormaps[cmap]  # endpoints are 0 and 1, by default
+
+    zero_fraction = (0 - start) / (
+        end - start
+    )  # eg. zero is "0.4" of the way from the top
+    shift_amount = 0.5 - zero_fraction
+
+    if rescale:
+        # the bottom and top of the colorbar will be the "darkest" shades, even if the numbers aren't symmetric
+        # e.g. for {cmap= 'RdBu', start=-5, end = 30}, -5 will be just as dark red as 30 is dark blue.
+        new_colors = og_cmap(
+            np.interp(np.linspace(0, 1, og_cmap.N), [0, zero_fraction, 1], [0, 0.5, 1])
+        )
+    else:
+        # e.g. for {cmap= 'RdBu', start=-5, end = 30}, -5 will be just light red and 30 dark blue.
+        if shift_amount >= 0:  # if |start| < |end|
+            new_colors = og_cmap(
+                np.interp(
+                    np.linspace(0, 1, og_cmap.N),
+                    [0, zero_fraction, 1],
+                    [shift_amount, 0.5, 1],
+                )
+            )
+        else:  # if |start| > |end|
+            # shift amount is negative, so 1 + shift_amount <  1
+            new_colors = og_cmap(
+                np.interp(
+                    np.linspace(0, 1, og_cmap.N),
+                    [0, zero_fraction, 1],
+                    [0, 0.5, 1 + shift_amount],
+                )
+            )
+
+    shifted_cmap = mcolors.ListedColormap(new_colors)
+
+    # rely on mpl's auto-generation of tickmarks
+    # this can be annoying sometimes (i.e. it doesn't respect (start, end) exactly)
+    levels = matplotlib.ticker.MaxNLocator(nbins=num_bins).tick_values(start, end)
+    norm = mcolors.BoundaryNorm(levels, shifted_cmap.N)  # .N should still be 256
+
+    # is putting norms and levels redundant?
+    cbar_kwargs = dict(
+        cmap=shifted_cmap,
+        norm=norm,
+        levels=levels,
+    )
+    return cbar_kwargs
+
+
+def get_heatmap(
+    combined_df,
+    ref_years,
+    new_years,
+    y_name_var,
+    y_name_label,
+    x_name_base="tmax_diff",
+    use_qbins=True,
+):
+    """
+    everything except for combined_df, y_name_var, x_name is just used for labelling purposes.
     """
     if use_qbins:
         x_name = f"{x_name_base}_qbins"
@@ -218,24 +360,45 @@ def get_heatmap(combined_df, ref_years, new_years, y_name_var, y_name_label, x_n
     df[y_name_var] = df[y_name_var].astype(str)
 
     # count (2d histogram)
+    cbar_count = cbar_discrete(0, 150, cmap="cet_CET_L18")
     fig_count = (
         df.hvplot.heatmap(
             x=x_name,
             y=y_name_var,
             C="t2m_x.t2m_x_threshold.HWF",  # in this plot, this isn't doing anything
             reduce_function=np.size,
-            fields={"t2m_x.t2m_x_threshold.HWF": "count"},  # the tooltip displays count instead of hwf
-            cmap=reds_discrete,
-            title=f"gridcell count by climatological {y_name_label} and mean tmax shift\nThere are 14,728 land gridcells",
-            xlabel=f"tmax mean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})\nanomalies wrt {ref_years[0]}-{ref_years[1]} (C)",
-            ylabel=f"sample {y_name_label} over {ref_years[0]}-{ref_years[1]}",
-            clabel="number of gridcells",
+            fields={
+                "t2m_x.t2m_x_threshold.HWF": "count"
+            },  # the tooltip displays count instead of hwf
+            # cmap=reds_discrete,
+            title=f"Gridcell Counts ({y_name_label})",
+            xlabel="Change in Daily Max Anomalies (C)",
+            ylabel=f"Climatological {y_name_label}",
+            clabel="Number of Gridcells",
         )
-        .opts(clim=(0, 150))
+        .opts(xrotation=45, **cbar_count)
         .redim.values(  # hack to order the bins
             **bin_ordering_dict
         )
     )
+
+    #############################################################################################
+    # There are 14728 land gridcells, so each of the 100 cells would have ~147 points if uniform
+    # let's add a marker to the cells with more than 100 points.
+    ###########################################################################################
+
+    counts_df = df.value_counts([x_name, y_name_var]).reset_index(name="count")
+    select_cells = counts_df[counts_df["count"] >= 100]
+
+    markers = hv.Points(select_cells, kdims=[x_name, y_name_var]).opts(
+        color="black",
+        marker="x",  # Shape: 'circle', 'square', 'triangle', 'cross', 'x', 'diamond'
+        size=10,
+    )
+
+    #############################################################################################
+    # plot the heatwave metrics
+    ###########################################################################################
 
     # hwf
     fig_hwf = (
@@ -260,7 +423,7 @@ def get_heatmap(combined_df, ref_years, new_years, y_name_var, y_name_label, x_n
             **bin_ordering_dict
         )
         .opts(cmap=reds_discrete, cticks=[1, 3, 5, 7, 9, 11], xrotation=45)
-    )
+    ) * markers
 
     # hwd
     fig_hwd = (
@@ -288,7 +451,7 @@ def get_heatmap(combined_df, ref_years, new_years, y_name_var, y_name_label, x_n
             # clabel=f"heatwave duration (days)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
             xrotation=45,
         )
-    )
+    ) * markers
     # cumulative intensity
     fig_sumheat = (
         df.hvplot.heatmap(
@@ -301,11 +464,11 @@ def get_heatmap(combined_df, ref_years, new_years, y_name_var, y_name_label, x_n
             title="Change in sumHeat",
             xlabel="Change in Daily Max Anomalies (C)",
             ylabel=f"Climatological {y_name_label}",
-            clabel="T Anomalies (C)",
+            clabel="°C",
             # title=f"mean shift in heatwave cumulative intensity\nby climatological {y_name_label} and mean tmax shift",
             # xlabel="tmax mean(1986:2021) - mean(1950:1985)\nanomalies wrt 1960-1985 (C)",
             # ylabel=f"sample {y_name_label} over 1960-1985",
-            # clabel=f"heatwave cumulative intensity (degC anom)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
+            # clabel=f"heatwave cumulative intensity (°C anom)\nmean({new_years[0]}:{new_years[1]}) - mean({ref_years[0]}:{ref_years[1]})",
             clim=(1, 21),
             # min_count=10,
         )
@@ -313,7 +476,7 @@ def get_heatmap(combined_df, ref_years, new_years, y_name_var, y_name_label, x_n
             **bin_ordering_dict
         )
         .opts(cticks=np.linspace(1, 21, 6), xrotation=45)
-    )
+    ) * markers
 
     if use_qbins:
         figlist = [
@@ -366,7 +529,9 @@ def get_scatter(
         ylim=ylim_hwf,
     )
 
-    hwf_fitted = sm.nonparametric.lowess(exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWF"], frac=2 / 3)
+    hwf_fitted = sm.nonparametric.lowess(
+        exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWF"], frac=2 / 3
+    )
     # eval_x = np.linspace(deg_df[x_var].min(), deg_df[x_var].max(), num=500)
     # hwf_fitted, hwf_bottom, hwf_top = lowess_with_confidence_bounds(
     #     deg_df[x_var],
@@ -377,7 +542,9 @@ def get_scatter(
     # fig_hwf_ci = hv.Area(
     #     x=eval_x, y=hwf_bottom, y2=hwf_top, alpha=0.3, color=color_ci#, label="Uncertainty"
     # )
-    fig_hwf_fitted = hv.Curve(zip(hwf_fitted[:, 0], hwf_fitted[:, 1]), label=label_curve).opts(color=color_line)
+    fig_hwf_fitted = hv.Curve(
+        zip(hwf_fitted[:, 0], hwf_fitted[:, 1]), label=label_curve
+    ).opts(color=color_line)
     # make figure
     fig_hwf = fig_hwf_scatter * fig_hwf_fitted
 
@@ -398,8 +565,12 @@ def get_scatter(
         # height=400,
         ylim=ylim_hwd,
     )
-    hwd_fitted = sm.nonparametric.lowess(exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWD"], frac=2 / 3)
-    fig_hwd_fitted = hv.Curve(zip(hwd_fitted[:, 0], hwd_fitted[:, 1]), label=label_curve).opts(color=color_line)
+    hwd_fitted = sm.nonparametric.lowess(
+        exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.HWD"], frac=2 / 3
+    )
+    fig_hwd_fitted = hv.Curve(
+        zip(hwd_fitted[:, 0], hwd_fitted[:, 1]), label=label_curve
+    ).opts(color=color_line)
     fig_hwd = fig_hwd_scatter * fig_hwd_fitted
 
     # sumheat ---------------------------------------------
@@ -423,9 +594,9 @@ def get_scatter(
     sumheat_fitted = sm.nonparametric.lowess(
         exog=deg_df[x_var], endog=deg_df["t2m_x.t2m_x_threshold.sumHeat"], frac=2 / 3
     )
-    fig_sumheat_fitted = hv.Curve(zip(sumheat_fitted[:, 0], sumheat_fitted[:, 1]), label=label_curve).opts(
-        color=color_line
-    )
+    fig_sumheat_fitted = hv.Curve(
+        zip(sumheat_fitted[:, 0], sumheat_fitted[:, 1]), label=label_curve
+    ).opts(color=color_line)
     fig_sumheat = fig_sumheat_scatter * fig_sumheat_fitted
 
     figlist = [
