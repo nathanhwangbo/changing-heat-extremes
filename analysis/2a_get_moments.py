@@ -18,18 +18,36 @@ data_dir = Path("processed_data")
 
 
 hw_all = (
-    xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc")
-    .sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
+    xr.open_dataset(
+        data_dir
+        / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc"
+    )
+    .sel(
+        percentile=flags.percentile_threshold,
+        definition="-".join(map(str, flags.hw_def[0])),
+    )
     .drop_vars(["percentile", "definition"])
 )
 hw_synth_1deg = (
-    xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_1deg_anom{flags.label}.nc")
-    .sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
+    xr.open_dataset(
+        data_dir
+        / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_1deg_anom{flags.label}.nc"
+    )
+    .sel(
+        percentile=flags.percentile_threshold,
+        definition="-".join(map(str, flags.hw_def[0])),
+    )
     .drop_vars(["percentile", "definition"])
 )
 hw_synth_2deg = (
-    xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_2deg_anom{flags.label}.nc")
-    .sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
+    xr.open_dataset(
+        data_dir
+        / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_2deg_anom{flags.label}.nc"
+    )
+    .sel(
+        percentile=flags.percentile_threshold,
+        definition="-".join(map(str, flags.hw_def[0])),
+    )
     .drop_vars(["percentile", "definition"])
 )
 
@@ -51,12 +69,20 @@ hw_mean_diff = hw_new.mean(dim="time") - hw_old.mean(dim="time")
 #######################################################################
 
 # anomalies calculated in 0_era_meanshift.py
-era_land_anom = xr.open_dataset(data_dir / f"land_anom_{flags.ref_years[0]}_{flags.ref_years[1]}.nc")
+era_land_anom = xr.open_dataset(
+    data_dir / f"land_anom_{flags.ref_years[0]}_{flags.ref_years[1]}.nc"
+)
 
 # compute deltas-------------------------------------------
-era_land_old = era_land_anom.sel(time=slice(str(flags.ref_years[0]), str(flags.ref_years[1])))
-era_land_new = era_land_anom.sel(time=slice(str(flags.new_years[0]), str(flags.new_years[1])))
-tmax_mean_diff = (era_land_new.mean(dim="time") - era_land_old.mean(dim="time")).rename({"t2m_x": "t2m_x_mean_diff"})
+era_land_old = era_land_anom.sel(
+    time=slice(str(flags.ref_years[0]), str(flags.ref_years[1]))
+)
+era_land_new = era_land_anom.sel(
+    time=slice(str(flags.new_years[0]), str(flags.new_years[1]))
+)
+tmax_mean_diff = (era_land_new.mean(dim="time") - era_land_old.mean(dim="time")).rename(
+    {"t2m_x": "t2m_x_mean_diff"}
+)
 
 ##############################################
 # Calculate climatological moments
@@ -70,8 +96,12 @@ era_land_anom_for_climatology = xr.open_dataset(
     data_dir / f"land_anom_for_climatology_{flags.ref_years[0]}_{flags.new_years[1]}.nc"
 )
 
-clim_skew = stats.skew(era_land_anom_for_climatology["t2m_x"], dims=["time"]).rename("t2m_x_skew")
-clim_kurt = stats.kurtosis(era_land_anom_for_climatology["t2m_x"], dims=["time"]).rename("t2m_x_kurt")
+clim_skew = stats.skew(era_land_anom_for_climatology["t2m_x"], dims=["time"]).rename(
+    "t2m_x_skew"
+)
+clim_kurt = stats.kurtosis(
+    era_land_anom_for_climatology["t2m_x"], dims=["time"]
+).rename("t2m_x_kurt")
 clim_var = era_land_anom_for_climatology["t2m_x"].var(dim="time").rename("t2m_x_var")
 clim_ar1 = xr.corr(
     era_land_anom_for_climatology["t2m_x"],
@@ -87,4 +117,6 @@ climatology_stats = xr.merge([clim_skew, clim_kurt, clim_var, clim_ar1])
 ##############################################
 
 combined_ds = xr.merge([tmax_mean_diff, climatology_stats, hw_mean_diff], join="exact")
-ahelpers.write_nc(combined_ds, data_dir / f"moments_ds_{flags.label}.nc")
+
+# ! uncomment to write to file
+# ahelpers.write_nc(combined_ds, data_dir / f"moments_ds_{flags.label}.nc")

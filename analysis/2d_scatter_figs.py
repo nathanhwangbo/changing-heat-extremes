@@ -14,294 +14,261 @@ outputs:
 from changing_heat_extremes import flags
 from changing_heat_extremes import plot_helpers as phelpers
 import xarray as xr
+import polars as pl
+import polars.selectors as cs
 import numpy as np
 import holoviews as hv
-from holoviews import opts
 import statsmodels.api as sm
 import hvplot.xarray  # noqa: F401
-import hvplot.pandas  # noqa: F401
+import hvplot.polars  # noqa: F401
 from pathlib import Path
+
+hvplot.extension(phelpers.backend_hv)
+
 
 fig_dir = Path("figures")
 data_dir = Path("processed_data")
 
+fig_kwargs = dict(
+    fig_inches=(phelpers.width_default, phelpers.height_wide),
+    **phelpers.global_kwargs,
+)
 
-scale = 1  # in this case,
-title_size = 16 * scale
-label_size = 14 * scale
-tick_size = 10 * scale
-fwidth = 400
-fheight = 150
+layout_kwargs = dict(sublabel_format="", tight=True, tight_padding=4)
 
-# have 400 * 150 = 60000 to play with
-fwidth_qbins = 300
-fheight_qbins = 200
+
+def fig_scatter(df, bin_var, bin_id_var, hw_metric, label, color):
+
+    binned_df = (
+        df.sort(bin_var)
+        .group_by(bin_id_var)
+        .agg(
+            [
+                pl.col(f"t2m_x.t2m_x_threshold.{hw_metric}")
+                .mean()
+                .alias(f"{hw_metric}_mean"),
+                pl.col(f"t2m_x.t2m_x_threshold.{hw_metric}")
+                .std()
+                .alias(f"{hw_metric}_std"),
+            ]
+        )
+    )
+    # scatter = df.hvplot.scatter(
+    #     x=bin_var, y=f"t2m_x.t2m_x_threshold.{hw_metric}", alpha=0.05, c=color
+    # )
+    # means = binned_df.hvplot.scatter(
+    #     x="bin", y=f"{hw_metric}_mean", size=100, color=color
+    # )
+    sds = hv.ErrorBars(
+        binned_df.select(
+            [bin_id_var, f"{hw_metric}_mean", f"{hw_metric}_std"]
+        ).to_numpy(),
+        label=label,
+    ).opts(alpha=0.7, capsize=3, edgecolor=color)
+
+    lines = (
+        binned_df.sort(bin_id_var)
+        .hvplot.line(
+            x=bin_id_var, y=f"{hw_metric}_mean", color=color, marker=".", ms=10
+        )
+        .opts(alpha=0.7)
+    )
+
+    # fig = scatter * means * sds
+    fig = lines * sds
+    return fig
+
 
 ###########################################3
 # read in data from 2a_get_moments
 ###########################################
 
 combined_ds = xr.open_dataset(data_dir / f"moments_ds_{flags.label}.nc")
-combined_df = combined_ds.to_dataframe().dropna(how="all")
+combined_df = pl.from_pandas(
+    combined_ds.to_dataframe(), include_index=True
+).drop_nulls()
 
 # 2deg --------------------------------
 
-deg2_obs_df = combined_df.loc[(combined_df["t2m_x_mean_diff"] >= 1.75) & (combined_df["t2m_x_mean_diff"] <= 2.25)]
 
-fig_skew_2deg_obs = phelpers.get_scatter(
-    deg2_obs_df,
-    x_var="t2m_x_skew",
-    x_label="skewness",
-    deg=2,
-    alpha_pt=0.1,
-    label_curve="observed",
-    ylim_hwf=(0, 35),
-    ylim_hwd=(0, 14),
-    ylim_sumheat=(10, 50),
-    ref_years=flags.ref_years,
-    new_years=flags.new_years,
-)
-# hvplot.save(fig_skew_2deg_obs, 'fig_skew_2deg_obs.html')
+# variance --------------
 
-fig_var_2deg_obs = phelpers.get_scatter(
-    deg2_obs_df,
-    x_var="t2m_x_var",
-    x_label="variance",
-    deg=2,
-    size=15,
-    alpha_pt=0.1,
-    label_curve="observed",
-    ylim_hwf=(0, 35),
-    ylim_hwd=(0, 14),
-    ylim_sumheat=(10, 50),
-    ref_years=flags.ref_years,
-    new_years=flags.new_years,
-)
-# hvplot.save(fig_var_2deg_obs, 'fig_var_2deg_obs.html')
 
-fig_ar1_2deg_obs = phelpers.get_scatter(
-    deg2_obs_df,
-    x_var="t2m_x_ar1",
-    x_label="AR(1)",
-    deg=2,
-    size=15,
-    alpha_pt=0.1,
-    label_curve="observed",
-    ylim_hwf=(0, 35),
-    ylim_hwd=(0, 14),
-    ylim_sumheat=(10, 50),
-    ref_years=flags.ref_years,
-    new_years=flags.new_years,
+deg2_obs_df = combined_df.filter(
+    (pl.col("t2m_x_mean_diff") >= 1.75) & (pl.col("t2m_x_mean_diff") <= 2.25)
 )
-# hvplot.save(fig_ar1_2deg_obs, 'fig_ar1_2deg_obs.html')
+
+n_bins = 20
+bins_var = np.linspace(
+    deg2_obs_df["t2m_x_var"].min(), deg2_obs_df["t2m_x_var"].max(), n_bins
+)
+midpoints_var = ((bins_var[:-1] + bins_var[1:]) / 2).round(1).astype(str)
+
+bins_skew = np.linspace(
+    deg2_obs_df["t2m_x_skew"].min(), deg2_obs_df["t2m_x_skew"].max(), n_bins
+)
+midpoints_skew = ((bins_skew[:-1] + bins_skew[1:]) / 2).round(1).astype(str)
+
+
+deg2_obs_df = deg2_obs_df.with_columns(
+    var_bin_id=pl.col("t2m_x_var")
+    .cut(breaks=bins_var[1:-1], labels=midpoints_var)
+    .cast(pl.String)
+    .cast(pl.Float64),
+    skew_bin_id=pl.col("t2m_x_skew")
+    .cut(breaks=bins_skew[1:-1], labels=midpoints_skew)
+    .cast(pl.String)
+    .cast(pl.Float64),
+)
+
+fig_var_hwf_obs = fig_scatter(
+    deg2_obs_df, "t2m_x_var", "var_bin_id", "HWF", "Observed", "red"
+).opts(hv.opts.Scatter(alpha=0.2))
+fig_var_hwd_obs = fig_scatter(
+    deg2_obs_df, "t2m_x_var", "var_bin_id", "HWD", "Observed", "red"
+).opts(hv.opts.Scatter(alpha=0.2))
+fig_var_sumheat_obs = fig_scatter(
+    deg2_obs_df, "t2m_x_var", "var_bin_id", "sumHeat", "Observed", "red"
+).opts(hv.opts.Scatter(alpha=0.2))
+
+
+# skewness --------------
+n_bins = 20
+bin_size_skew = (
+    deg2_obs_df["t2m_x_skew"].max() - deg2_obs_df["t2m_x_skew"].min()
+) / n_bins
+
+fig_skew_hwf_obs = fig_scatter(
+    deg2_obs_df, "t2m_x_skew", "skew_bin_id", "HWF", "Observed", "red"
+).opts(hv.opts.Scatter(alpha=0.05))
+fig_skew_hwd_obs = fig_scatter(
+    deg2_obs_df, "t2m_x_skew", "skew_bin_id", "HWD", "Observed", "red"
+).opts(hv.opts.Scatter(alpha=0.05))
+fig_skew_sumheat_obs = fig_scatter(
+    deg2_obs_df, "t2m_x_skew", "skew_bin_id", "sumHeat", "Observed", "red"
+).opts(hv.opts.Scatter(alpha=0.05))
 
 
 # 2 degree, synthetic ---------------------------------------------------
 
 
 hw_synth_2deg = (
-    xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_2deg_anom{flags.label}.nc")
+    xr.open_dataset(
+        data_dir
+        / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_2deg_anom{flags.label}.nc"
+    )
     .sel(percentile=flags.percentile_threshold, definition="3-0-0")
     .drop_vars(["percentile", "definition"])
 )
 
-hw_old_2deg = hw_synth_2deg.sel(time=slice(str(flags.ref_years[0]), str(flags.ref_years[1])))
-hw_new_2deg = hw_synth_2deg.sel(time=slice(str(flags.new_years[0]), str(flags.new_years[1])))
+hw_old_2deg = hw_synth_2deg.sel(
+    time=slice(str(flags.ref_years[0]), str(flags.ref_years[1]))
+)
+hw_new_2deg = hw_synth_2deg.sel(
+    time=slice(str(flags.new_years[0]), str(flags.new_years[1]))
+)
 hw_mean_diff_2deg = hw_new_2deg.mean(dim="time") - hw_old_2deg.mean(dim="time")
 
 # pull out just the climatology variables
 climatology_stats = combined_ds[["t2m_x_skew", "t2m_x_kurt", "t2m_x_var", "t2m_x_ar1"]]
 combined_synth_2deg_ds = xr.merge([climatology_stats, hw_mean_diff_2deg], join="exact")
-combined_synth_2deg_df = combined_synth_2deg_ds.to_dataframe().dropna(how="all")  # this just drops ocean gridcells
+# combined_synth_2deg_df = combined_synth_2deg_ds.to_dataframe().dropna(how="all")  # this just drops ocean gridcells
+combined_synth_2deg_df = pl.from_pandas(
+    combined_synth_2deg_ds.to_dataframe(), include_index=True
+).drop_nulls()
 
-
-fig_var_2deg_synth = phelpers.get_scatter(
-    combined_synth_2deg_df,
-    "t2m_x_var",
-    "variance",
-    deg=2,
-    color_pt="blue",
-    color_line="blue",
-    alpha_pt=0.04,
-    label_curve="synthetic",
-    ylim_hwf=(0, 35),
-    ylim_hwd=(0, 14),
-    ylim_sumheat=(10, 50),
-    ref_years=flags.ref_years,
-    new_years=flags.new_years,
-)
-fig_var_2deg_synth.map(lambda x: x.opts(xlim=(-1, 70)), hv.Curve)
-
-# temp ---------------------------------------------------
-combined_synth_2deg_df["t2m_x_sd"] = np.sqrt(combined_synth_2deg_df["t2m_x_var"])
-fig_sd_2deg_synth = phelpers.get_scatter(
-    combined_synth_2deg_df,
-    "t2m_x_sd",
-    "sd",
-    deg=2,
-    color_pt="blue",
-    color_line="blue",
-    alpha_pt=0.04,
-    label_curve="synthetic",
-    ylim_hwf=(0, 35),
-    ylim_hwd=(0, 14),
-    ylim_sumheat=(10, 50),
-    ref_years=flags.ref_years,
-    new_years=flags.new_years,
-)
-# end temp ------------------------------
-
-
-fig_skew_2deg_synth = phelpers.get_scatter(
-    combined_synth_2deg_df,
-    x_var="t2m_x_skew",
-    x_label="skewness",
-    deg=2,
-    color_pt="blue",
-    color_line="blue",
-    alpha_pt=0.04,
-    label_curve="synthetic",
-    ylim_hwf=(0, 35),
-    ylim_hwd=(0, 14),
-    ylim_sumheat=(10, 50),
-    ref_years=flags.ref_years,
-    new_years=flags.new_years,
-)
-fig_skew_2deg_synth.map(lambda x: x.opts(xlim=(-1, 0.75)), hv.Curve)
-
-
-fig_ar1_2deg_synth = phelpers.get_scatter(
-    combined_synth_2deg_df,
-    x_var="t2m_x_ar1",
-    x_label="AR(1)",
-    deg=2,
-    color_pt="blue",
-    color_line="blue",
-    alpha_pt=0.04,
-    label_curve="synthetic",
-    ylim_hwf=(0, 35),
-    ylim_hwd=(0, 14),
-    ylim_sumheat=(10, 50),
-    ref_years=flags.ref_years,
-    new_years=flags.new_years,
-)
-fig_ar1_2deg_synth.map(lambda x: x.opts(xlim=(0.55, 0.9)), hv.Curve)
-
-
-# combine figures
-# see the original title in _obs for better descriptions
-
-fig_var_hwf_2deg = (fig_var_2deg_synth[0] * fig_var_2deg_obs[0]).opts(
-    legend_position="top_right", title="Change in HWF"
-)
-fig_var_hwd_2deg = (fig_var_2deg_synth[1] * fig_var_2deg_obs[1]).opts(
-    legend_position="top_right", title="Change in HWD"
-)
-fig_var_heatsum_2deg = (fig_var_2deg_synth[2] * fig_var_2deg_obs[2]).opts(
-    legend_position="top_right", title="Change in sumHeat"
+combined_synth_2deg_df = combined_synth_2deg_df.with_columns(
+    var_bin_id=pl.col("t2m_x_var")
+    .cut(breaks=bins_var[1:-1], labels=midpoints_var)
+    .cast(pl.String)
+    .cast(pl.Float64),
+    skew_bin_id=pl.col("t2m_x_skew")
+    .cut(breaks=bins_skew[1:-1], labels=midpoints_skew)
+    .cast(pl.String)
+    .cast(pl.Float64),
 )
 
-fig_skew_hwf_2deg = (fig_skew_2deg_synth[0] * fig_skew_2deg_obs[0]).opts(
-    legend_position="top_right", title="Change in HWF"
+
+# variance -----------------------
+fig_var_hwf_synth = fig_scatter(
+    combined_synth_2deg_df, "t2m_x_var", "var_bin_id", "HWF", "Synthetic", "blue"
+).opts(hv.opts.Scatter(alpha=0.01))
+fig_var_hwd_synth = fig_scatter(
+    combined_synth_2deg_df, "t2m_x_var", "var_bin_id", "HWD", "Synthetic", "blue"
+).opts(hv.opts.Scatter(alpha=0.01))
+fig_var_sumheat_synth = fig_scatter(
+    combined_synth_2deg_df, "t2m_x_var", "var_bin_id", "sumHeat", "Synthetic", "blue"
+).opts(hv.opts.Scatter(alpha=0.01))
+
+# skewness ----------------------
+fig_skew_hwf_synth = fig_scatter(
+    combined_synth_2deg_df, "t2m_x_skew", "skew_bin_id", "HWF", "Synthetic", "blue"
+).opts(hv.opts.Scatter(alpha=0.01))
+fig_skew_hwd_synth = fig_scatter(
+    combined_synth_2deg_df, "t2m_x_skew", "skew_bin_id", "HWD", "Synthetic", "blue"
+).opts(hv.opts.Scatter(alpha=0.01))
+fig_skew_sumheat_synth = fig_scatter(
+    combined_synth_2deg_df, "t2m_x_skew", "skew_bin_id", "sumHeat", "Synthetic", "blue"
+).opts(hv.opts.Scatter(alpha=0.01))
+
+
+###########
+# combine
+##########
+fig_var_hwf = (fig_var_hwf_synth * fig_var_hwf_obs).opts(
+    xlabel="Climatological Variance (C²)",
+    ylabel="Change in HWF (days)",
+    xlim=(0, 60),
+    ylim=(0, 50),
+    show_legend=False,
 )
-fig_skew_hwd_2deg = (fig_skew_2deg_synth[1] * fig_skew_2deg_obs[1]).opts(
-    legend_position="top_right", title="Change in HWD"
+fig_var_hwd = (fig_var_hwd_synth * fig_var_hwd_obs).opts(
+    xlabel="Climatological Variance (C²)",
+    ylabel="Change in HWD (days)",
+    xlim=(0, 60),
+    ylim=(0, 20),
+    show_legend=False,
 )
-fig_skew_heatsum_2deg = (fig_skew_2deg_synth[2] * fig_skew_2deg_obs[2]).opts(
-    legend_position="top_right", title="Change in sumHeat"
-)
-
-fig_ar1_hwf_2deg = (fig_ar1_2deg_synth[0] * fig_ar1_2deg_obs[0]).opts(
-    legend_position="top_right", title="Change in HWF"
-)
-fig_ar1_hwd_2deg = (fig_ar1_2deg_synth[1] * fig_ar1_2deg_obs[1]).opts(
-    legend_position="top_right", title="Change in HWD"
-)
-fig_ar1_heatsum_2deg = (fig_ar1_2deg_synth[2] * fig_ar1_2deg_obs[2]).opts(
-    legend_position="top_right", title="Change in sumHeat"
+fig_var_sumheat = (fig_var_sumheat_synth * fig_var_sumheat_obs).opts(
+    xlabel="Climatological Variance (C²)",
+    ylabel="Change in sumHeat (C-days)",
+    xlim=(0, 60),
+    ylim=(0, 75),
 )
 
-fig_2deg = (
-    fig_var_hwf_2deg
-    + fig_skew_hwf_2deg
-    + fig_var_hwd_2deg
-    + fig_skew_hwd_2deg
-    + fig_var_heatsum_2deg
-    + fig_skew_heatsum_2deg
-).cols(2)
+fig_skew_hwf = (fig_skew_hwf_synth * fig_skew_hwf_obs).opts(
+    xlabel="Climatological Skew",
+    ylabel="Change in HWF (days)",
+    xlim=(-1, 0.75),
+    ylim=(0, 50),
+    show_legend=False,
+)
+fig_skew_hwd = (fig_skew_hwd_synth * fig_skew_hwd_obs).opts(
+    xlabel="Climatological Skew",
+    ylabel="Change in HWD (days)",
+    xlim=(-1, 0.75),
+    ylim=(0, 20),
+    show_legend=False,
+)
+fig_skew_sumheat = (fig_skew_sumheat_synth * fig_skew_sumheat_obs).opts(
+    xlabel="Climatological Skew",
+    ylabel="Change in sumHeat (C-days)",
+    xlim=(-1, 0.75),
+    ylim=(0, 75),
+    show_legend=False,
+)
 
-# weird ordering bc I want to go vertical instead of horizontal
-letter_ordering = ["a", "d", "b", "e", "c", "f"]
-updated_fig_2deg_list = phelpers.add_subplot_labels(fig_2deg, letter_ordering)
-fig_2deg_updated = hv.Layout(updated_fig_2deg_list).cols(2)
-
-
-######################
-# fig_2deg ----
-######################
-
-
-fig_2deg_final = fig_2deg_updated.map(
-    lambda x: x.options(
-        fontsize={
-            "title": title_size,
-            "labels": label_size,
-            "ticks": tick_size,
-            "legend": tick_size,
-        },
+fig_scatter = (
+    (
+        fig_var_hwf
+        + fig_var_hwd
+        + fig_var_sumheat
+        + fig_skew_hwf
+        + fig_skew_hwd
+        + fig_skew_sumheat
     )
-).opts(
-    opts.Curve(frame_width=fwidth_qbins, frame_height=fheight_qbins),
+    .cols(3)
+    .opts(shared_axes=False, **layout_kwargs)
 )
-# hvplot.save(fig_2deg_final, fig_dir / 'fig_2deg_{flags.label}.png')
-
-##########################################
-## misc analyses referenced in the paper
-##########################################
-
-# computing linear regression coefficients for comparisons ----
-
-
-skew_hwf_2deg_synth_fitted = sm.nonparametric.lowess(
-    exog=combined_synth_2deg_df["t2m_x_skew"],
-    endog=combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWF"],
-    frac=2 / 3,
-)
-# get gradients
-skew_hwf_2deg_synth_grad = np.gradient(skew_hwf_2deg_synth_fitted[:, 1], skew_hwf_2deg_synth_fitted[:, 0])
-
-# compare to linear fit
-np.polyfit(
-    combined_synth_2deg_df["t2m_x_skew"],
-    combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWF"],
-    deg=1,
-)
-np.polyfit(deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.HWF"], deg=1)
-
-
-np.polyfit(
-    combined_synth_2deg_df["t2m_x_skew"],
-    combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWD"],
-    deg=1,
-)
-np.polyfit(deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.HWD"], deg=1)
-
-np.polyfit(
-    combined_synth_2deg_df["t2m_x_skew"],
-    combined_synth_2deg_df["t2m_x.t2m_x_threshold.sumHeat"],
-    deg=1,
-)
-np.polyfit(deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.sumHeat"], deg=1)
-
-hv.Curve(zip(skew_hwf_2deg_synth_fitted[:, 0], skew_hwf_2deg_synth_grad))
-hv.Curve(zip(skew_hwf_2deg_synth_fitted[:, 0], skew_hwf_2deg_synth_fitted[:, 1]))
-
-
-np.polyfit(
-    combined_synth_2deg_df["t2m_x_skew"],
-    combined_synth_2deg_df["t2m_x.t2m_x_threshold.HWD"],
-    deg=1,
-)
-np.polyfit(deg2_obs_df["t2m_x_skew"], deg2_obs_df["t2m_x.t2m_x_threshold.HWD"], deg=1)
-
-#  ------------------------------
+fig_scatter
+# hvplot.save(fig_scatter, phelpers.fig_dir / "fig_2deg_new.png")

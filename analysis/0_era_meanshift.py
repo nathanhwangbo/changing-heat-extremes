@@ -56,7 +56,9 @@ era = (
 # fixing formatting for the hdp package
 era["t2m_x"].attrs = {"units": "K"}  # hdp package needs units
 era = era.convert_calendar(calendar="noleap", use_cftime=True)
-era = era.sel(lat=slice(-60, 80)).chunk({"time": -1, "lat": 10, "lon": 10})  # matching karen's doy mask
+era = era.sel(lat=slice(-60, 80)).chunk(
+    {"time": -1, "lat": 10, "lon": 10}
+)  # matching karen's doy mask
 
 # convert to (-180, 180) lon.
 era = era.assign_coords(lon=(((era.lon + 180) % 360) - 180)).sortby("lon")
@@ -71,15 +73,23 @@ era_land = ahelpers.add_landmask(era).compute()
 #### calculate doy thresholds, and smooth the threshold ---------
 ##################################################################
 
-era_land_ref_years = era_land.sel(time=slice(str(flags.ref_years[0] - 1), str(flags.ref_years[1])))
+era_land_ref_years = era_land.sel(
+    time=slice(str(flags.ref_years[0] - 1), str(flags.ref_years[1]))
+)
 # take doy anomalies
-ref_doy_climatology = ahelpers.fourier_climatology_smoother(era_land_ref_years["t2m_x"], n_time=365, n_bases=5)
-era_land_ref_anom = (era_land_ref_years.groupby("time.dayofyear") - ref_doy_climatology).drop_vars("dayofyear")
+ref_doy_climatology = ahelpers.fourier_climatology_smoother(
+    era_land_ref_years["t2m_x"], n_time=365, n_bases=5
+)
+era_land_ref_anom = (
+    era_land_ref_years.groupby("time.dayofyear") - ref_doy_climatology
+).drop_vars("dayofyear")
 era_land_ref_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
 
 
 # conversion to celcius
-measures_ref = hdp.measure.format_standard_measures(temp_datasets=[era_land_ref_anom["t2m_x"]])
+measures_ref = hdp.measure.format_standard_measures(
+    temp_datasets=[era_land_ref_anom["t2m_x"]]
+)
 thresholds_ref_unsmooth = hdp.threshold.compute_thresholds(
     measures_ref, percentiles=[flags.percentile_threshold], rolling_window_size=7
 ).compute()
@@ -87,7 +97,9 @@ thresholds_ref_unsmooth = hdp.threshold.compute_thresholds(
 ## smoothing out the the threshold climatology as well --------
 
 thresholds_ref_smoothed = ahelpers.fourier_climatology_smoother(
-    thresholds_ref_unsmooth["t2m_x_threshold"].sel(percentile=flags.percentile_threshold).drop_vars("percentile"),
+    thresholds_ref_unsmooth["t2m_x_threshold"]
+    .sel(percentile=flags.percentile_threshold)
+    .drop_vars("percentile"),
     n_time=365,
     n_bases=5,
 )
@@ -103,9 +115,10 @@ thresholds_ref["t2m_x_threshold"].attrs["hdp_type"] = "threshold"
 thresholds_ref["t2m_x_threshold"].attrs["baseline_calendar"] = "noleap"
 thresholds_ref = thresholds_ref.chunk({"lat": 10, "lon": 10})
 
-ahelpers.write_nc(
-    thresholds_ref, f"processed_data/thresholds_{flags.ref_years[0]}_{flags.ref_years[1]}_{flags.label}.nc"
-)
+# ! uncomment to save output
+# ahelpers.write_nc(
+#     thresholds_ref, f"processed_data/thresholds_{flags.ref_years[0]}_{flags.ref_years[1]}_{flags.label}.nc"
+# )
 
 
 ################################################
@@ -117,19 +130,23 @@ ahelpers.write_nc(
 # time period ALL 1960-2025,
 ##############################
 
-era_land_all = era_land.sel(time=slice(str(flags.ref_years[0] - 1), str(flags.new_years[1])))
-era_land_all_anom = (era_land_all.groupby("time.dayofyear") - ref_doy_climatology).drop_vars("dayofyear")
+era_land_all = era_land.sel(
+    time=slice(str(flags.ref_years[0] - 1), str(flags.new_years[1]))
+)
+era_land_all_anom = (
+    era_land_all.groupby("time.dayofyear") - ref_doy_climatology
+).drop_vars("dayofyear")
 
-# NOTE: save this for future -- this is is the data that's used to calculate heatwave metrics
-ahelpers.write_nc(era_land_all_anom, f"processed_data/land_anom_{flags.ref_years[0]}_{flags.ref_years[1]}.nc")
+# ! uncomment to save output. this is is the data that's used to calculate heatwave metrics
+# ahelpers.write_nc(era_land_all_anom, f"processed_data/land_anom_{flags.ref_years[0]}_{flags.ref_years[1]}.nc")
 
 era_land_all_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
 # use c when dealing with anomalies (bc anomalies are the same in either units)
 
 # calculate heatwave metrics on time period.
-measures_all = hdp.measure.format_standard_measures(temp_datasets=[era_land_all_anom["t2m_x"]]).chunk(
-    {"time": -1, "lat": 10, "lon": 10}
-)
+measures_all = hdp.measure.format_standard_measures(
+    temp_datasets=[era_land_all_anom["t2m_x"]]
+).chunk({"time": -1, "lat": 10, "lon": 10})
 
 
 if flags.use_calendar_summer:
@@ -146,9 +163,11 @@ else:
     )
 
 metrics_all_land = ahelpers.process_heatwave_metrics(metrics_dataset_all)
-ahelpers.write_nc(
-    metrics_all_land, f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc"
-)
+
+# ! uncomment to save output
+# ahelpers.write_nc(
+#     metrics_all_land, f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc"
+# )
 
 
 ###########
@@ -159,8 +178,12 @@ ahelpers.write_nc(
 
 # time period 2,
 # era_land_new = era_land.sel(time=slice(str(flags.new_years[0]), str(flags.new_years[1])))
-era_land_ref_anom = era_land_all_anom.sel(time=slice(str(flags.ref_years[0] - 1), str(flags.ref_years[1])))
-era_land_new_anom = era_land_all_anom.sel(time=slice(str(flags.new_years[0] - 1), str(flags.new_years[1])))
+era_land_ref_anom = era_land_all_anom.sel(
+    time=slice(str(flags.ref_years[0] - 1), str(flags.ref_years[1]))
+)
+era_land_new_anom = era_land_all_anom.sel(
+    time=slice(str(flags.new_years[0] - 1), str(flags.new_years[1]))
+)
 
 ## shifting the mean for each grid cell.
 ## note: this is in anomaly space!! shifted, doy-anomaly removed.
@@ -180,10 +203,12 @@ metrics_synth_land = ahelpers.get_synthetic_hw_metrics(
     flags.hw_def,
     use_calendar_summer=flags.use_calendar_summer,
 )
-ahelpers.write_nc(
-    metrics_synth_land,
-    f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_anom{flags.label}.nc",
-)
+
+# ! uncomment to save output
+# ahelpers.write_nc(
+#     metrics_synth_land,
+#     f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_anom{flags.label}.nc",
+# )
 
 
 ###########
@@ -204,10 +229,11 @@ metrics_synth_land_1deg = ahelpers.get_synthetic_hw_metrics(
     use_calendar_summer=flags.use_calendar_summer,
 )
 
-ahelpers.write_nc(
-    metrics_synth_land_1deg,
-    f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_1deg_anom{flags.label}.nc",
-)
+# ! uncomment to save output
+# ahelpers.write_nc(
+#     metrics_synth_land_1deg,
+#     f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_1deg_anom{flags.label}.nc",
+# )
 
 
 ###########
@@ -226,7 +252,8 @@ metrics_synth_land_2deg = ahelpers.get_synthetic_hw_metrics(
     use_calendar_summer=flags.use_calendar_summer,
 )
 
-ahelpers.write_nc(
-    metrics_synth_land_2deg,
-    f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_2deg_anom{flags.label}.nc",
-)
+# ! uncomment to save output
+# ahelpers.write_nc(
+#     metrics_synth_land_2deg,
+#     f"processed_data/hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_2deg_anom{flags.label}.nc",
+# )

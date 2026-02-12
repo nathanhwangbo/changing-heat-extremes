@@ -9,29 +9,40 @@ import xarray as xr
 import cartopy.crs as ccrs
 import hvplot.xarray  # noqa: F401
 import holoviews as hv
-import bokeh
 from pathlib import Path
 
+hvplot.extension(phelpers.backend_hv)
 
 fig_dir = Path("figures")
 data_dir = Path("processed_data")
 
-# # first figure had 6 panels
-# # this figure has 9
-# scale = 9 / 6
-# title_size = 16 * scale
-# label_size = 14 * scale
-# tick_size = 10 * scale
 
-# fwidth = 400
-# fheight = 150
+fig_kwargs = dict(
+    xlabel="",
+    ylabel="",
+    fig_inches=(phelpers.width_default, phelpers.height_wide),
+    xaxis=None,
+    yaxis=None,
+    **phelpers.global_kwargs,
+)
 
-hw_obs = xr.open_dataset(data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc").sel(
-    percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0]))
+layout_kwargs = dict(sublabel_format="", tight=True, tight_padding=8)
+
+
+hw_obs = xr.open_dataset(
+    data_dir
+    / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_anom{flags.label}.nc"
+).sel(
+    percentile=flags.percentile_threshold,
+    definition="-".join(map(str, flags.hw_def[0])),
 )
 hw_synth = xr.open_dataset(
-    data_dir / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_anom{flags.label}.nc"
-).sel(percentile=flags.percentile_threshold, definition="-".join(map(str, flags.hw_def[0])))
+    data_dir
+    / f"hw_metrics_{flags.ref_years[0]}_{flags.new_years[1]}_synth_anom{flags.label}.nc"
+).sel(
+    percentile=flags.percentile_threshold,
+    definition="-".join(map(str, flags.hw_def[0])),
+)
 
 
 ##########################################################
@@ -48,13 +59,6 @@ def get_delta_fig(
     label_summer,
     ref_years,
     new_years,
-    clim_hwf=(0, 15),
-    clim_hwd=(-6, 6),
-    clim_heatsum=(0, 25),
-    clim_max=(-3, 3),
-    cmap_hwf=phelpers.reds_discrete,
-    cmap_hwd=phelpers.rdbu_discrete,
-    cmap_heatsum=phelpers.reds_discrete,
 ):
     """
     Creates figures looking at changes in difference in mean heatwave characteristics over two time period
@@ -63,84 +67,56 @@ def get_delta_fig(
     label_summer is a string (intended either "jja" or "doy") describing how summer was defined in mean_diff_ds
     """
     hwf_delta = mean_diff_ds["t2m_x.t2m_x_threshold.HWF"]
+    cmap_hwf = phelpers.cbar_helper_hv(0, 15, cmap=phelpers.cmap_red)
     deltamap_hwf = hwf_delta.hvplot(
         projection=ccrs.PlateCarree(),
         coastline=True,
-        cmap=cmap_hwf,
-        clim=clim_hwf,
         # title=f"delta in heatwave frequency ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
         title="Change in Frequency",
         clabel="days",
         xlabel="",
         ylabel="",
-    ).opts(ylim=(-59, None))
+    ).opts(ylim=(-59, None), hooks=[cmap_hwf])
 
     # delta in hwd
     hwd_delta = mean_diff_ds["t2m_x.t2m_x_threshold.HWD"]
+    cmap_hwd = phelpers.cbar_helper_hv(-6, 6, cmap=phelpers.cmap_rdbu)
+
     deltamap_hwd = hwd_delta.hvplot(
         projection=ccrs.PlateCarree(),
         coastline=True,
-        cmap=cmap_hwd,
-        clim=clim_hwd,
         # title=f"delta in heatwave duration ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
         title="Change in Duration",
         clabel="days",
         xlabel="",
         ylabel="",
-    ).opts(ylim=(-59, None))
-
-    # # delta in avi
-    # avi_delta = mean_diff_ds["t2m_x.t2m_x_threshold.AVI"]
-    # deltamap_avi = avi_delta.hvplot(
-    #     projection=ccrs.PlateCarree(),
-    #     coastline=True,
-    #     cmap=rdbu_discrete,
-    #     clim=(-1, 1),
-    #     title=f"delta in average intensity ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
-    #     clabel="°C anomaly",
-    #     xlabel="",
-    #     ylabel="",
-    # ).opts(fontscale=2.5, ylim=(-60, None))
+    ).opts(ylim=(-59, None), hooks=[cmap_hwd])
 
     # delta in heatsum
     heatsum_delta = mean_diff_ds["t2m_x.t2m_x_threshold.sumHeat"]
+    cmap_heatsum = phelpers.cbar_helper_hv(0, 25, cmap=phelpers.cmap_red)
+
     deltamap_heatsum = heatsum_delta.hvplot(
         projection=ccrs.PlateCarree(),
         coastline=True,
-        cmap=cmap_heatsum,
-        clim=clim_heatsum,
         # title=f"delta in cumulative heat ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
         title="Change in Cumulative Heat",
         clabel="°C-days",
         xlabel="",
         ylabel="",
-    ).opts(ylim=(-59, None))
-
-    # # delta in max seasonal temp
-    # max_delta = mean_diff_ds["t2m_x.t2m_x_threshold.MAX"]
-    # deltamap_max = max_delta.hvplot(
-    #     projection=ccrs.PlateCarree(),
-    #     coastline=True,
-    #     cmap=rdbu_discrete,
-    #     clim=clim_max,
-    #     # title=f"delta in seasonal max ({label_summer})\nmean({label_source} {flags.new_years[0]}:{flags.new_years[1]}) - mean(obs {flags.ref_years[0]}:{flags.ref_years[1]})",
-    #     title="Change in seasonal max",
-    #     clabel="°C anomaly",
-    #     xlabel="",
-    #     ylabel="",
-    # ).opts(fontscale=2.5, ylim=(-60, None))
+    ).opts(ylim=(-59, None), hooks=[cmap_heatsum])
 
     # combine
-    fig_delta = (deltamap_hwf + deltamap_hwd + deltamap_heatsum).cols(1)
+    figlist_delta = [deltamap_hwf, deltamap_hwd, deltamap_heatsum]
 
-    return fig_delta
+    return figlist_delta
 
 
 # ERA observed --------------------------------------
 hw_old_obs = hw_obs.sel(time=slice(str(flags.ref_years[0]), str(flags.ref_years[1])))
 hw_new_obs = hw_obs.sel(time=slice(str(flags.new_years[0]), str(flags.new_years[1])))
 mean_diff_obs = hw_new_obs.mean(dim="time") - hw_old_obs.mean(dim="time")
-fig_delta_obs = get_delta_fig(
+figlist_delta_obs = get_delta_fig(
     mean_diff_obs,
     label_source="obs",
     label_summer=flags.label,
@@ -148,13 +124,15 @@ fig_delta_obs = get_delta_fig(
     new_years=flags.new_years,
     # cmap_hwf=reds_discrete_odd,
 )
-# manually fix the tickers on hwf
-hwf_ticks = np.linspace(0, 15, 11)[::2]
-# manually fix the tickers on hwf
-fig_delta_obs[0].map(
-    lambda x: x.opts(colorbar_opts={"ticker": bokeh.models.FixedTicker(ticks=hwf_ticks)}),
-    hv.Image,
-)
+
+
+# # manually fix the tickers on hwf
+# hwf_ticks = np.linspace(0, 15, 11)[::2]
+# # manually fix the tickers on hwf
+# fig_delta_obs[0].map(
+#     lambda x: x.opts(colorbar_opts={"ticker": bokeh.models.FixedTicker(ticks=hwf_ticks)}),
+#     hv.Image,
+# )
 
 # make sure order matches get_delta_fig!
 var_list = ["HWF", "HWD", "sumHeat"]  # , "MAX"]
@@ -163,24 +141,28 @@ var_list = ["HWF", "HWD", "sumHeat"]  # , "MAX"]
 fig_delta_obs = hv.Layout(
     [
         (
-            fig_delta_obs[i]
+            figlist_delta_obs[i]
             * hv.Text(
                 -180 + 220,
                 -60 + 11,
                 f"Global Mean={str(mean_diff_obs[f't2m_x.t2m_x_threshold.{var_list[i]}'].mean().values.round(2))}",
                 fontsize=phelpers.label_size - 2,
-            )
-        ).opts(ylim=(-59, None))
+            ).opts(ylim=(-59, 80), xlim=(-180, 180), **fig_kwargs)
+        )
         for i in range(len(var_list))
     ]
-)
+).opts(**layout_kwargs)
 
 # hvplot.save(fig_delta_obs, f"fig_delta_obs_anom_{flags.label}_ref{flags.ref_years[0]}_{flags.ref_years[1]}.html")
 
 
 # ERA synthetic second half -------------------------------------
-hw_old_synth = hw_synth.sel(time=slice(str(flags.ref_years[0]), str(flags.ref_years[1])))
-hw_new_synth = hw_synth.sel(time=slice(str(flags.new_years[0]), str(flags.new_years[1])))
+hw_old_synth = hw_synth.sel(
+    time=slice(str(flags.ref_years[0]), str(flags.ref_years[1]))
+)
+hw_new_synth = hw_synth.sel(
+    time=slice(str(flags.new_years[0]), str(flags.new_years[1]))
+)
 mean_diff_synth = hw_new_synth.mean(dim="time") - hw_old_synth.mean(dim="time")
 fig_delta_synth_init = get_delta_fig(
     mean_diff_synth,
@@ -190,15 +172,15 @@ fig_delta_synth_init = get_delta_fig(
     new_years=flags.new_years,
     # cmap_hwf=reds_discrete_odd,
 )
-# manually fix the tickers on hwf
-fig_delta_synth_init[0].map(
-    lambda x: x.opts(
-        colorbar_opts={
-            "ticker": bokeh.models.FixedTicker(ticks=hwf_ticks),
-        }
-    ),
-    hv.Image,
-)
+# # manually fix the tickers on hwf
+# fig_delta_synth_init[0].map(
+#     lambda x: x.opts(
+#         colorbar_opts={
+#             "ticker": bokeh.models.FixedTicker(ticks=hwf_ticks),
+#         }
+#     ),
+#     hv.Image,
+# )
 
 
 ### also calculate the correlations for each, and add as labels ---
@@ -286,10 +268,10 @@ for i in np.arange(1, len(fig_delta_obs)).tolist():
 
 # iterate over the subplots and add the label to the title. --
 
-# weird ordering bc I want to go vertical instead of horizontal
-letter_ordering = ["a", "d", "g", "b", "e", "h", "c", "f", "i"]
-fig1_updated = phelpers.add_subplot_labels(fig1, labels=letter_ordering)
-fig1_updated.cols(3).opts(shared_axes=False, toolbar=None)
+# # weird ordering bc I want to go vertical instead of horizontal
+# letter_ordering = ["a", "d", "g", "b", "e", "h", "c", "f", "i"]
+# fig1_updated = phelpers.add_subplot_labels(fig1, labels=letter_ordering)
+fig1_updated = fig1.cols(3).opts(shared_axes=False)
 
 ####################
 # Final figure! ----
@@ -306,9 +288,9 @@ fig1_updated.map(
     hv.Image,
 ).map(lambda x: x.opts(xlabel=""), hv.Text)
 
-fig1_final = fig1_updated.map(
-    lambda x: x.options(frame_height=phelpers.fheight_wide, **phelpers.global_kwargs),
-    [hv.Image, hv.Text],
-)
+# fig1_final = fig1_updated.map(
+#     lambda x: x.options(frame_height=phelpers.fheight_wide, **phelpers.global_kwargs),
+#     [hv.Image, hv.Text],
+# )
 
 # hvplot.save(fig1_final, fig_dir / f"fig_meanshift_{flags.label}_ref{flags.ref_years[0]}_{flags.ref_years[1]}.png")

@@ -34,7 +34,9 @@ era = (
 
 # fixing formatting for the hdp package
 era = era.convert_calendar(calendar="noleap", use_cftime=True)
-era = era.sel(lat=slice(-60, 80)).chunk({"time": -1, "lat": 10, "lon": 10})  # matching karen's doy mask
+era = era.sel(lat=slice(-60, 80)).chunk(
+    {"time": -1, "lat": 10, "lon": 10}
+)  # matching karen's doy mask
 
 # convert to (-180, 180) lon. specific to our use case
 era = era.assign_coords(lon=(((era.lon + 180) % 360) - 180)).sortby("lon")
@@ -54,23 +56,29 @@ era_land = ahelpers.add_landmask(era).compute()
 
 # # note! if using jja in nh and djf in southern hemisphere, then we should also include the year before in the ref period
 # # bc djf 1950 requires december of 1949.
-era_land_climatology_years = era_land.sel(time=slice(str(flags.ref_years[0] - 1), str(flags.new_years[1])))
+era_land_climatology_years = era_land.sel(
+    time=slice(str(flags.ref_years[0] - 1), str(flags.new_years[1]))
+)
 
 # capture "global warming" at each grid cell by getting the mean at each year
 era_land_yearly_mean = era_land_climatology_years.groupby("time.year").mean()
-era_land_no_yearly_mean = (era_land_climatology_years.groupby("time.year") - era_land_yearly_mean).reset_coords(
-    "year", drop=True
+era_land_no_yearly_mean = (
+    era_land_climatology_years.groupby("time.year") - era_land_yearly_mean
+).reset_coords("year", drop=True)
+
+doy_climatology = ahelpers.fourier_climatology_smoother(
+    era_land_no_yearly_mean["t2m_x"], n_time=365, n_bases=5
 )
 
-doy_climatology = ahelpers.fourier_climatology_smoother(era_land_no_yearly_mean["t2m_x"], n_time=365, n_bases=5)
-
 # take doy anomalies
-era_land_climatology_anom = (era_land_no_yearly_mean.groupby("time.dayofyear") - doy_climatology).drop_vars("dayofyear")
+era_land_climatology_anom = (
+    era_land_no_yearly_mean.groupby("time.dayofyear") - doy_climatology
+).drop_vars("dayofyear")
 era_land_climatology_anom["t2m_x"].attrs = {"units": "C"}  # hdp package needs units
 
 
-# NOTE: writing something pretty big (a few gb) to file!
-ahelpers.write_nc(
-    era_land_climatology_anom,
-    f"processed_data/land_anom_for_climatology_{flags.ref_years[0]}_{flags.new_years[1]}.nc",
-)
+# ! writing something pretty big (a few gb) to file!
+# ahelpers.write_nc(
+#     era_land_climatology_anom,
+#     f"processed_data/land_anom_for_climatology_{flags.ref_years[0]}_{flags.new_years[1]}.nc",
+# )
